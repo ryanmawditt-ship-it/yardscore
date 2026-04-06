@@ -366,7 +366,7 @@ export default function WizardPage() {
 
   const handlePay = () => {
     localStorage.setItem("ys_wizard", JSON.stringify(answers));
-    router.push("/loading-report");
+    router.push("/checkout");
   };
 
   const labelMap: Record<string, string> = {
