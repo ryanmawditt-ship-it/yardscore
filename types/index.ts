@@ -83,6 +83,15 @@ export interface FinalReport {
   generatedAt: string;
   listingSearchUrl?: string;
   suburbPhotoUrl?: string;
+  pipelineMeta?: {
+    candidatesFound: number;
+    candidatesPassed: number;
+    checksRun: string[];
+    clientGoal: string;
+    rankPosition: number;
+    rankTotal: number;
+    clientScore: number;
+  };
 }
 
 export interface MultiPropertyReport {

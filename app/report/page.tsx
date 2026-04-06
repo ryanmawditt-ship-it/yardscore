@@ -649,6 +649,44 @@ export default function ReportPage() {
           </div>
         )}
 
+        {/* ── WHY THIS PROPERTY ── */}
+        {report.pipelineMeta && (
+          <div
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 18,
+              padding: "24px 28px",
+              marginBottom: 12,
+              boxShadow: "0 1px 6px rgba(0,0,0,0.05)",
+              border: "1px solid #e8f0fe",
+              ...sf,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#0071e3" }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#0071e3", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Why this property made the report
+              </span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 12, backgroundColor: "#f0fdf4", color: "#16a34a", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
+                Passed {report.pipelineMeta.checksRun.length} of {report.pipelineMeta.checksRun.length} quality checks
+              </span>
+              <span style={{ fontSize: 12, backgroundColor: "#eff6ff", color: "#2563eb", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
+                Ranked #{report.pipelineMeta.rankPosition} of {report.pipelineMeta.candidatesPassed} candidates
+              </span>
+              <span style={{ fontSize: 12, backgroundColor: "#f5f3ff", color: "#7c3aed", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
+                Client score: {report.pipelineMeta.clientScore}/10
+              </span>
+            </div>
+            <p style={{ fontSize: 13, color: "#64748b", margin: 0, lineHeight: 1.6 }}>
+              Selected from {report.pipelineMeta.candidatesFound} initial candidates.
+              {" "}{report.pipelineMeta.candidatesPassed} passed all hard filters (budget, bedrooms, flood, bushfire, zoning).
+              {" "}Ranked by {report.pipelineMeta.clientGoal.toLowerCase()}.
+            </p>
+          </div>
+        )}
+
         {/* ── PROPERTY HERO CARD ── */}
         <div
           style={{
