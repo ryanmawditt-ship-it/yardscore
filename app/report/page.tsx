@@ -428,17 +428,70 @@ export default function ReportPage() {
     );
   }
 
-  const {
-    property,
-    analysis,
-    risk,
-    infrastructure,
-    yield: yieldData,
-    valuation,
-    overallScore,
-    executiveSummary,
-    generatedAt,
-  } = report;
+  const property = report.property ?? { address: "", suburb: "", state: "", postcode: "", lat: 0, lng: 0 };
+
+  const safeAnalysis = report.analysis as unknown as Record<string, unknown> | undefined;
+  const analysis = {
+    address: (safeAnalysis?.address as string) ?? "",
+    lastSalePrice: (safeAnalysis?.lastSalePrice as number | null) ?? null,
+    lastSaleDate: (safeAnalysis?.lastSaleDate as string | null) ?? null,
+    landSize: (safeAnalysis?.landSize as number | null) ?? null,
+    bedrooms: (safeAnalysis?.bedrooms as number | null) ?? null,
+    bathrooms: (safeAnalysis?.bathrooms as number | null) ?? null,
+    yearBuilt: (safeAnalysis?.yearBuilt as number | null) ?? null,
+    priceHistory: (safeAnalysis?.priceHistory as { date: string; price: number }[]) ?? [],
+    comparables: (safeAnalysis?.comparables as { address: string; price: number; date: string; distanceM: number }[]) ?? [],
+    medianPricePerSqm: (safeAnalysis?.medianPricePerSqm as number | null) ?? null,
+    trendSummary: (safeAnalysis?.trendSummary as string) ?? "",
+  };
+
+  const safeRisk = report.risk as unknown as Record<string, unknown> | undefined;
+  const risk = {
+    floodRisk: (safeRisk?.floodRisk as string) ?? "none",
+    bushfireRisk: (safeRisk?.bushfireRisk as string) ?? "none",
+    zoningCode: (safeRisk?.zoningCode as string) ?? "",
+    zoningDescription: (safeRisk?.zoningDescription as string) ?? "",
+    hasHeritage: (safeRisk?.hasHeritage as boolean) ?? false,
+    hasEasement: (safeRisk?.hasEasement as boolean) ?? false,
+    socialHousingPct: (safeRisk?.socialHousingPct as number | null) ?? null,
+    riskFlags: (safeRisk?.riskFlags as { label: string; severity: "green" | "amber" | "red" }[]) ?? [],
+    riskSummary: (safeRisk?.riskSummary as string) ?? "",
+  };
+
+  const safeInfra = report.infrastructure as unknown as Record<string, unknown> | undefined;
+  const infrastructure = {
+    projects: (safeInfra?.projects as { name: string; type: string; status: string; distanceKm: number; completionYear: number | null }[]) ?? [],
+    supplyDemandSignal: (safeInfra?.supplyDemandSignal as string) ?? "balanced",
+    daysOnMarket: (safeInfra?.daysOnMarket as number | null) ?? null,
+    infrastructureScore: (safeInfra?.infrastructureScore as number) ?? 0,
+    opportunitySummary: (safeInfra?.opportunitySummary as string) ?? "",
+  };
+
+  const safeYield = report.yield as unknown as Record<string, unknown> | undefined;
+  const yieldData = {
+    estimatedWeeklyRent: (safeYield?.estimatedWeeklyRent as number | null) ?? null,
+    grossYieldPct: (safeYield?.grossYieldPct as number | null) ?? null,
+    netYieldPct: (safeYield?.netYieldPct as number | null) ?? null,
+    vacancyRatePct: (safeYield?.vacancyRatePct as number | null) ?? null,
+    cashflowWeekly: (safeYield?.cashflowWeekly as number | null) ?? null,
+    rentalDemandSummary: (safeYield?.rentalDemandSummary as string) ?? "",
+  };
+
+  const safeVal = report.valuation as unknown as Record<string, unknown> | undefined;
+  const valuation = {
+    fairValueLow: (safeVal?.fairValueLow as number) ?? 0,
+    fairValueMid: (safeVal?.fairValueMid as number) ?? 0,
+    fairValueHigh: (safeVal?.fairValueHigh as number) ?? 0,
+    askingPrice: (safeVal?.askingPrice as number | null) ?? null,
+    vendorExpectationGap: (safeVal?.vendorExpectationGap as number | null) ?? null,
+    negotiationHeadroomPct: (safeVal?.negotiationHeadroomPct as number | null) ?? null,
+    signal: ((safeVal?.signal as string) ?? "hold") as "buy" | "hold" | "avoid",
+    investmentThesis: (safeVal?.investmentThesis as string) ?? "",
+  };
+
+  const overallScore = report.overallScore ?? 0;
+  const executiveSummary = report.executiveSummary ?? "";
+  const generatedAt = report.generatedAt ?? "";
 
   const reportDate = generatedAt
     ? new Date(generatedAt).toLocaleDateString("en-AU", {
@@ -588,7 +641,7 @@ export default function ReportPage() {
             <p style={{ fontSize: 16, color: "#444", lineHeight: 1.7, margin: 0, ...sf }}>
               {multiReport.suburbReasoning}
             </p>
-            {multiReport.properties.length > 1 && (
+            {(multiReport.properties?.length ?? 0) > 1 && (
               <p style={{ fontSize: 14, color: "#86868b", marginTop: 16, marginBottom: 0, ...sf }}>
                 {multiReport.properties.length} properties analysed and ranked by investment score
               </p>
@@ -977,18 +1030,20 @@ export default function ReportPage() {
           </div>
 
           {/* Risk pills */}
-          {risk.riskFlags.length > 0 && (
+          {(risk.riskFlags ?? []).length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
-              {risk.riskFlags.map((f, i) => (
+              {(risk.riskFlags ?? []).map((f, i) => (
                 <RiskPill key={i} severity={f.severity} label={f.label} />
               ))}
             </div>
           )}
 
+          {risk.zoningCode && (
           <MetricRow
             label="Zoning"
-            value={`${risk.zoningCode} — ${risk.zoningDescription}`}
+            value={`${risk.zoningCode}${risk.zoningDescription ? ` — ${risk.zoningDescription}` : ""}`}
           />
+          )}
 
           {risk.riskSummary && (
             <p
@@ -1137,14 +1192,14 @@ export default function ReportPage() {
             <span style={{ fontSize: 14, color: "#86868b", marginLeft: "auto" }}>
               Infrastructure score:{" "}
               <strong style={{ color: "#1d1d1f", fontWeight: 700 }}>
-                {infrastructure.infrastructureScore}/10
+                {infrastructure.infrastructureScore ?? 0}/10
               </strong>
             </span>
           </div>
 
-          {infrastructure.projects.length > 0 && (
+          {(infrastructure.projects ?? []).length > 0 && (
             <div style={{ borderTop: "0.5px solid #e8e8ed", marginBottom: 16 }}>
-              {infrastructure.projects.map((p, i) => (
+              {(infrastructure.projects ?? []).map((p, i) => (
                 <div
                   key={i}
                   style={{
@@ -1218,10 +1273,10 @@ export default function ReportPage() {
         </Section>
 
         {/* ── COMPARABLE SALES ── */}
-        {analysis.comparables.length > 0 && (
+        {(analysis.comparables ?? []).length > 0 && (
           <Section title="Comparable Sales">
             <div style={{ borderTop: "0.5px solid #e8e8ed" }}>
-              {analysis.comparables.map((c, i) => (
+              {(analysis.comparables ?? []).map((c, i) => (
                 <div
                   key={i}
                   style={{

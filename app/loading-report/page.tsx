@@ -102,8 +102,9 @@ export default function LoadingReportPage() {
       body: JSON.stringify(requestBody),
     })
       .then((r) => r.json())
-      .then((report) => {
-        localStorage.setItem("ys_report", JSON.stringify(report));
+      .then((data) => {
+        console.log("[loading-report] API response:", JSON.stringify(data).slice(0, 500));
+        localStorage.setItem("ys_report", JSON.stringify(data));
         setProgress(100);
         setDone(true);
         setTimeout(() => router.push("/report"), 800);
