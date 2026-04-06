@@ -11,6 +11,7 @@ import { getAllFeedUrls, getSourceCount } from '@/lib/research-sources'
 import { classifyAndRank, type ClassifiedInsight } from '@/lib/intelligence-classifier'
 import { monitorCouncilDAs, type DAInsight } from '@/lib/council-da-monitor'
 import { analyzeNewsSentiment, type SentimentResult } from '@/lib/news-sentiment-analyzer'
+import { KnowledgeStore } from '@/lib/knowledge-store'
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -34,6 +35,13 @@ export interface ResearchCycleResult {
   sourcesMonitored: number
   completedAt: string
   durationMs: number
+  kvStats: {
+    totalInsights: number
+    urgentInsights: number
+    infraAlerts: number
+    sentimentHistory: number
+    kvConfigured: boolean
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -323,6 +331,29 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
   const classifiedInsights = classifyAndRank(rawInsights)
   console.log(`[research] Classified ${classifiedInsights.length} insights`)
 
+  // Step 5: Persist to knowledge store (KV)
+  console.log('[research] Step 5: Persisting to knowledge store...')
+  let savedCount = 0
+  for (const insight of classifiedInsights) {
+    await KnowledgeStore.saveInsight(insight as unknown as Record<string, unknown>)
+    // Save infrastructure-category insights as infrastructure alerts too
+    if (insight.category === 'infrastructure') {
+      await KnowledgeStore.saveInfrastructureAlert({
+        project: insight.title,
+        location: insight.suburb || 'Unknown',
+        state: insight.state || 'Unknown',
+        impact: insight.summary,
+        urgency: insight.urgency,
+        source: insight.source,
+      })
+    }
+    savedCount++
+  }
+  // Persist sentiment
+  await KnowledgeStore.saveSentiment(sentiment as unknown as Record<string, unknown>)
+  const kvStats = await KnowledgeStore.getStats()
+  console.log(`[research] Persisted ${savedCount} insights to KV. Total in store: ${kvStats.totalInsights} insights, ${kvStats.infraAlerts} infra alerts, ${kvStats.sentimentHistory} sentiment records`)
+
   const durationMs = Date.now() - startTime
   console.log(`[research] Full cycle completed in ${durationMs}ms`)
 
@@ -336,5 +367,6 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
     sourcesMonitored: getSourceCount(),
     completedAt: new Date().toISOString(),
     durationMs,
+    kvStats,
   }
 }

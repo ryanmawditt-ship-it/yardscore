@@ -8,6 +8,7 @@ import {
   type SuburbProfile,
 } from "@/lib/investors-handbook";
 import { getInsightsForState, getLatestSentiment } from "@/lib/research-cache";
+import { KnowledgeStore } from "@/lib/knowledge-store";
 
 export interface SuburbSelection {
   suburbs: string[];
@@ -88,9 +89,39 @@ export async function selectBestSuburbs(
 
   const top3 = sorted.slice(0, 3);
 
-  // Get recent research insights for this state
-  const stateInsights = getInsightsForState(state);
-  const sentiment = getLatestSentiment();
+  // Get recent research insights — try KV persistent store first, fall back to in-memory cache
+  const kvStateInsights = await KnowledgeStore.getStateInsights(state);
+  const kvSentiment = await KnowledgeStore.getLatestSentiment();
+  const kvInfraAlerts = await KnowledgeStore.getInfrastructureAlerts(state);
+
+  // Fall back to in-memory cache if KV is empty
+  const cacheInsights = getInsightsForState(state);
+  const cacheSentiment = getLatestSentiment();
+
+  const stateInsights = kvStateInsights.length > 0 ? kvStateInsights.map(i => ({
+    title: (i.title as string) || '',
+    summary: (i.summary as string) || '',
+    suburb: i.suburb as string | undefined,
+    state: i.state as string | undefined,
+    urgency: (i.urgency as string) || 'medium',
+    impact: (i.impact as string) || 'neutral',
+    category: (i.category as string) || 'general',
+    source: (i.source as string) || '',
+    relevanceScore: (i.relevanceScore as number) || 5,
+    classifiedAt: (i.classifiedAt as string) || '',
+    timeframe: (i.timeframe as string) || '12months',
+    confidence: (i.confidence as string) || 'reported',
+  })) : cacheInsights;
+  const sentiment = kvSentiment ? {
+    overallSentiment: (kvSentiment.overallSentiment as string) || 'neutral',
+    sentimentScore: (kvSentiment.sentimentScore as number) || 0,
+    interestRateOutlook: (kvSentiment.interestRateOutlook as string) || 'stable',
+    housingSupplyOutlook: (kvSentiment.housingSupplyOutlook as string) || 'stable',
+    demandOutlook: (kvSentiment.demandOutlook as string) || 'moderate',
+    keyThemes: (kvSentiment.keyThemes as string[]) || [],
+    policyRisks: (kvSentiment.policyRisks as string[]) || [],
+    opportunities: (kvSentiment.opportunities as string[]) || [],
+  } : cacheSentiment;
 
   // Enrich reasoning with handbook data and live research
   const reasoning = top3
@@ -113,10 +144,15 @@ export async function selectBestSuburbs(
     })
     .join("\n\n");
 
+  // Append infrastructure alerts from KV
+  const infraContext = kvInfraAlerts.length > 0
+    ? `\n\nInfrastructure alerts for ${state}: ${kvInfraAlerts.slice(0, 3).map(a => `${a.project || 'Project'} in ${a.location || 'TBD'}: ${a.impact || 'TBD'}`).join('; ')}.`
+    : '';
+
   // Append market sentiment if available
   const fullReasoning = sentiment
-    ? `${reasoning}\n\nMarket sentiment: ${sentiment.overallSentiment} (score: ${sentiment.sentimentScore}). Interest rate outlook: ${sentiment.interestRateOutlook}. Supply outlook: ${sentiment.housingSupplyOutlook}. Demand: ${sentiment.demandOutlook}.`
-    : reasoning;
+    ? `${reasoning}${infraContext}\n\nMarket sentiment: ${sentiment.overallSentiment} (score: ${sentiment.sentimentScore}). Interest rate outlook: ${sentiment.interestRateOutlook}. Supply outlook: ${sentiment.housingSupplyOutlook}. Demand: ${sentiment.demandOutlook}.`
+    : `${reasoning}${infraContext}`;
 
   if (stateInsights.length > 0) {
     console.log(`[suburb-selector] Enriched with ${stateInsights.length} research insights for ${state}`);

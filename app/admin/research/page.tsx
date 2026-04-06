@@ -33,6 +33,14 @@ interface Sentiment {
   demandOutlook: string
 }
 
+interface KVStats {
+  totalInsights: number
+  urgentInsights: number
+  infraAlerts: number
+  sentimentHistory: number
+  kvConfigured: boolean
+}
+
 interface ResearchData {
   summary: {
     feedsScanned: number
@@ -46,9 +54,18 @@ interface ResearchData {
     durationMs: number
     completedAt: string
   }
+  kvStats: KVStats
   insights: Insight[]
   daInsights: DAInsight[]
   sentiment: Sentiment
+}
+
+interface StoredData {
+  stats: KVStats
+  latestInsights: Insight[]
+  urgentInsights: Insight[]
+  sentiment: Sentiment | null
+  infraAlerts: Array<{ project?: string; location?: string; impact?: string; urgency?: string }>
 }
 
 function UrgencyBadge({ urgency }: { urgency: string }) {
@@ -108,10 +125,30 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
 
 export default function ResearchDashboard() {
   const [data, setData] = useState<ResearchData | null>(null)
+  const [stored, setStored] = useState<StoredData | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingStored, setLoadingStored] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [adminKey, setAdminKey] = useState('')
   const [authenticated, setAuthenticated] = useState(false)
+
+  const loadStoredData = useCallback(async () => {
+    setLoadingStored(true)
+    try {
+      const res = await fetch('/api/research-update', {
+        method: 'GET',
+        headers: { 'x-admin-key': adminKey },
+      })
+      if (res.ok) {
+        const json = await res.json()
+        setStored(json)
+      }
+    } catch {
+      // Silently fail — stored data is supplementary
+    } finally {
+      setLoadingStored(false)
+    }
+  }, [adminKey])
 
   const runResearch = useCallback(async () => {
     setLoading(true)
@@ -130,20 +167,29 @@ export default function ResearchDashboard() {
       }
       const json = await res.json()
       setData(json)
+      // Refresh stored data after a run
+      loadStoredData()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
-  }, [adminKey])
+  }, [adminKey, loadStoredData])
 
   useEffect(() => {
-    const stored = typeof window !== 'undefined' ? localStorage.getItem('yardscore-admin-key') : null
-    if (stored) {
-      setAdminKey(stored)
+    const key = typeof window !== 'undefined' ? localStorage.getItem('yardscore-admin-key') : null
+    if (key) {
+      setAdminKey(key)
       setAuthenticated(true)
     }
   }, [])
+
+  // Load stored data on authentication
+  useEffect(() => {
+    if (authenticated && adminKey) {
+      loadStoredData()
+    }
+  }, [authenticated, adminKey, loadStoredData])
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
@@ -175,6 +221,10 @@ export default function ResearchDashboard() {
     )
   }
 
+  // Determine which sentiment to show — latest run or stored
+  const activeSentiment = data?.sentiment || stored?.sentiment
+  const activeInsights = data?.insights || stored?.latestInsights || []
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -193,10 +243,11 @@ export default function ResearchDashboard() {
               {loading ? 'Running...' : 'Run Research Now'}
             </button>
             <button
-              onClick={() => { setData(null); setError(null) }}
-              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition"
+              onClick={loadStoredData}
+              disabled={loadingStored}
+              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 disabled:opacity-50 transition"
             >
-              Clear Cache
+              {loadingStored ? 'Loading...' : 'Refresh Stored Data'}
             </button>
             <button
               onClick={() => { localStorage.removeItem('yardscore-admin-key'); setAuthenticated(false) }}
@@ -222,149 +273,220 @@ export default function ResearchDashboard() {
           </div>
         )}
 
-        {!data && !loading && (
+        {/* Stored Intelligence Summary — always shown if KV has data */}
+        {stored?.stats && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-3">Stored Intelligence (Persistent Database)</h2>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div>
+                <p className="text-xs text-gray-500">Total Insights</p>
+                <p className="text-xl font-bold text-blue-700">{stored.stats.totalInsights}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Urgent Signals</p>
+                <p className="text-xl font-bold text-orange-600">{stored.stats.urgentInsights}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Infra Alerts</p>
+                <p className="text-xl font-bold text-purple-600">{stored.stats.infraAlerts}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Sentiment History</p>
+                <p className="text-xl font-bold text-green-600">{stored.stats.sentimentHistory}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">KV Status</p>
+                <p className={`text-xl font-bold ${stored.stats.kvConfigured ? 'text-green-600' : 'text-red-600'}`}>
+                  {stored.stats.kvConfigured ? 'Connected' : 'Not configured'}
+                </p>
+              </div>
+            </div>
+
+            {/* Urgent insights from store */}
+            {stored.urgentInsights && stored.urgentInsights.length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm font-medium text-gray-700 mb-2">Urgent Signals</p>
+                <div className="space-y-2">
+                  {stored.urgentInsights.slice(0, 5).map((insight, i) => (
+                    <div key={i} className="bg-white rounded-lg p-3 flex items-start gap-2">
+                      <UrgencyBadge urgency={insight.urgency} />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{insight.title}</p>
+                        <p className="text-xs text-gray-500">{insight.summary}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Infrastructure alerts from store */}
+            {stored.infraAlerts && stored.infraAlerts.length > 0 && (
+              <div className="mt-4">
+                <p className="text-sm font-medium text-gray-700 mb-2">Infrastructure Alerts</p>
+                <div className="space-y-2">
+                  {stored.infraAlerts.slice(0, 5).map((alert, i) => (
+                    <div key={i} className="bg-white rounded-lg p-3 text-sm">
+                      <span className="font-semibold">{alert.project}</span>
+                      {alert.location && <span className="text-gray-500"> in {alert.location}</span>}
+                      {alert.impact && <span className="text-gray-600"> — {alert.impact}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!data && !loading && !stored?.stats?.totalInsights && (
           <div className="text-center py-20">
             <p className="text-gray-400 text-lg">Click &quot;Run Research Now&quot; to start scanning sources.</p>
           </div>
         )}
 
+        {/* Latest Run Stats */}
         {data && (
           <>
-            {/* Stats Row */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
               <StatCard label="Sources Monitored" value={data.summary.sourcesMonitored} />
               <StatCard label="Feeds Scanned" value={`${data.summary.feedsSuccessful}/${data.summary.feedsScanned}`} />
               <StatCard label="Articles Found" value={data.summary.articlesFound} />
               <StatCard label="Insights Extracted" value={data.summary.insightsExtracted} />
               <StatCard label="Council DAs" value={data.summary.councilDAsScanned} />
               <StatCard
+                label="KV Store"
+                value={data.kvStats?.totalInsights ?? 0}
+                sub={data.kvStats?.kvConfigured ? 'connected' : 'not configured'}
+              />
+              <StatCard
                 label="Last Updated"
                 value={new Date(data.summary.completedAt).toLocaleTimeString()}
                 sub={`${(data.summary.durationMs / 1000).toFixed(1)}s`}
               />
             </div>
-
-            {/* Sentiment Panel */}
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-bold text-gray-900 mb-4">Market Sentiment</h2>
-              <div className="grid md:grid-cols-2 gap-6">
-                <div>
-                  <SentimentGauge score={data.sentiment.sentimentScore} label="Overall Sentiment" />
-                  <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <p className="text-xs text-gray-500">Interest Rates</p>
-                      <p className="font-semibold text-sm mt-1 capitalize">{data.sentiment.interestRateOutlook}</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <p className="text-xs text-gray-500">Housing Supply</p>
-                      <p className="font-semibold text-sm mt-1 capitalize">{data.sentiment.housingSupplyOutlook}</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <p className="text-xs text-gray-500">Demand</p>
-                      <p className="font-semibold text-sm mt-1 capitalize">{data.sentiment.demandOutlook}</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  {data.sentiment.keyThemes.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">Key Themes</p>
-                      <div className="flex flex-wrap gap-2">
-                        {data.sentiment.keyThemes.map((theme, i) => (
-                          <span key={i} className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full text-xs">{theme}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {data.sentiment.policyRisks.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">Policy Risks</p>
-                      <ul className="text-sm text-red-600 space-y-1">
-                        {data.sentiment.policyRisks.map((risk, i) => (
-                          <li key={i}>• {risk}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {data.sentiment.opportunities.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">Opportunities</p>
-                      <ul className="text-sm text-green-600 space-y-1">
-                        {data.sentiment.opportunities.map((opp, i) => (
-                          <li key={i}>• {opp}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Intelligence Feed */}
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-              <h2 className="text-lg font-bold text-gray-900 mb-4">
-                Latest Intelligence ({data.insights.length} insights)
-              </h2>
-              <div className="max-h-[600px] overflow-y-auto space-y-3">
-                {data.insights.length === 0 && (
-                  <p className="text-gray-400 text-sm">No insights extracted from current scan.</p>
-                )}
-                {data.insights.map((insight, i) => (
-                  <div key={i} className="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <UrgencyBadge urgency={insight.urgency} />
-                          <ImpactBadge impact={insight.impact} />
-                          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{insight.category}</span>
-                          {insight.state && (
-                            <span className="text-xs text-blue-600 font-medium">{insight.state}</span>
-                          )}
-                          {insight.suburb && (
-                            <span className="text-xs text-purple-600 font-medium">{insight.suburb}</span>
-                          )}
-                        </div>
-                        <p className="text-sm font-semibold text-gray-900">{insight.title}</p>
-                        <p className="text-sm text-gray-600 mt-1">{insight.summary}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-lg font-bold text-gray-900">{insight.relevanceScore}/10</div>
-                        <p className="text-xs text-gray-400">relevance</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Council DA Highlights */}
-            {data.daInsights.length > 0 && (
-              <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-                <h2 className="text-lg font-bold text-gray-900 mb-4">
-                  Council Development Applications ({data.daInsights.length} councils scanned)
-                </h2>
-                <div className="space-y-4">
-                  {data.daInsights.map((da, i) => (
-                    <div key={i} className="border border-gray-100 rounded-lg p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="font-semibold text-sm text-gray-900">{da.council}</span>
-                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{da.state}</span>
-                        <span className="text-xs text-gray-400">{da.applications.length} applications</span>
-                      </div>
-                      <ul className="text-sm text-gray-600 space-y-1 max-h-40 overflow-y-auto">
-                        {da.applications.slice(0, 5).map((app, j) => (
-                          <li key={j} className="truncate">• {app}</li>
-                        ))}
-                        {da.applications.length > 5 && (
-                          <li className="text-gray-400">... and {da.applications.length - 5} more</li>
-                        )}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </>
+        )}
+
+        {/* Sentiment Panel */}
+        {activeSentiment && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Market Sentiment</h2>
+            <div className="grid md:grid-cols-2 gap-6">
+              <div>
+                <SentimentGauge score={activeSentiment.sentimentScore} label="Overall Sentiment" />
+                <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-500">Interest Rates</p>
+                    <p className="font-semibold text-sm mt-1 capitalize">{activeSentiment.interestRateOutlook}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-500">Housing Supply</p>
+                    <p className="font-semibold text-sm mt-1 capitalize">{activeSentiment.housingSupplyOutlook}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-500">Demand</p>
+                    <p className="font-semibold text-sm mt-1 capitalize">{activeSentiment.demandOutlook}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {activeSentiment.keyThemes && activeSentiment.keyThemes.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">Key Themes</p>
+                    <div className="flex flex-wrap gap-2">
+                      {activeSentiment.keyThemes.map((theme, i) => (
+                        <span key={i} className="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full text-xs">{theme}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {activeSentiment.policyRisks && activeSentiment.policyRisks.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">Policy Risks</p>
+                    <ul className="text-sm text-red-600 space-y-1">
+                      {activeSentiment.policyRisks.map((risk, i) => (
+                        <li key={i}>• {risk}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {activeSentiment.opportunities && activeSentiment.opportunities.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">Opportunities</p>
+                    <ul className="text-sm text-green-600 space-y-1">
+                      {activeSentiment.opportunities.map((opp, i) => (
+                        <li key={i}>• {opp}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Intelligence Feed */}
+        {activeInsights.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">
+              Latest Intelligence ({activeInsights.length} insights)
+            </h2>
+            <div className="max-h-[600px] overflow-y-auto space-y-3">
+              {activeInsights.map((insight, i) => (
+                <div key={i} className="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <UrgencyBadge urgency={insight.urgency} />
+                        <ImpactBadge impact={insight.impact} />
+                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{insight.category}</span>
+                        {insight.state && (
+                          <span className="text-xs text-blue-600 font-medium">{insight.state}</span>
+                        )}
+                        {insight.suburb && (
+                          <span className="text-xs text-purple-600 font-medium">{insight.suburb}</span>
+                        )}
+                      </div>
+                      <p className="text-sm font-semibold text-gray-900">{insight.title}</p>
+                      <p className="text-sm text-gray-600 mt-1">{insight.summary}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-lg font-bold text-gray-900">{insight.relevanceScore}/10</div>
+                      <p className="text-xs text-gray-400">relevance</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Council DA Highlights */}
+        {data?.daInsights && data.daInsights.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">
+              Council Development Applications ({data.daInsights.length} councils scanned)
+            </h2>
+            <div className="space-y-4">
+              {data.daInsights.map((da, i) => (
+                <div key={i} className="border border-gray-100 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-semibold text-sm text-gray-900">{da.council}</span>
+                    <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{da.state}</span>
+                    <span className="text-xs text-gray-400">{da.applications.length} applications</span>
+                  </div>
+                  <ul className="text-sm text-gray-600 space-y-1 max-h-40 overflow-y-auto">
+                    {da.applications.slice(0, 5).map((app, j) => (
+                      <li key={j} className="truncate">• {app}</li>
+                    ))}
+                    {da.applications.length > 5 && (
+                      <li className="text-gray-400">... and {da.applications.length - 5} more</li>
+                    )}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </main>
     </div>

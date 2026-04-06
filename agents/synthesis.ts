@@ -18,6 +18,7 @@ import {
 } from "@/lib/investors-handbook";
 import { findSuburbPick } from "@/lib/investment-intelligence";
 import { getInsightsForSuburb, getLatestSentiment } from "@/lib/research-cache";
+import { KnowledgeStore } from "@/lib/knowledge-store";
 
 const SYSTEM_PROMPT =
   "You are a senior Australian property investment analyst with access to: " +
@@ -63,9 +64,42 @@ export async function synthesise(
   // Get infrastructure pipeline for the state
   const stateInfra = getInfrastructureByState(property.state as State);
 
-  // Get recent research insights for this suburb
-  const recentInsights = getInsightsForSuburb(property.suburb, property.state);
-  const marketSentiment = getLatestSentiment();
+  // Get recent research insights — try KV persistent store first, fall back to in-memory cache
+  const kvSuburbInsights = await KnowledgeStore.getSuburbInsights(property.suburb);
+  const kvInfraAlerts = await KnowledgeStore.getInfrastructureAlerts(property.state);
+  const kvSentiment = await KnowledgeStore.getLatestSentiment();
+
+  const cacheInsights = getInsightsForSuburb(property.suburb, property.state);
+  const cacheSentiment = getLatestSentiment();
+
+  const recentInsights = kvSuburbInsights.length > 0
+    ? kvSuburbInsights.map(i => ({
+        title: (i.title as string) || '',
+        summary: (i.summary as string) || '',
+        urgency: (i.urgency as string) || 'medium',
+        impact: (i.impact as string) || 'neutral',
+        category: (i.category as string) || 'general',
+        source: (i.source as string) || '',
+        suburb: i.suburb as string | undefined,
+        state: i.state as string | undefined,
+        relevanceScore: (i.relevanceScore as number) || 5,
+        classifiedAt: (i.classifiedAt as string) || '',
+        timeframe: (i.timeframe as string) || '12months',
+        confidence: (i.confidence as string) || 'reported',
+      }))
+    : cacheInsights;
+  const marketSentiment = kvSentiment
+    ? {
+        overallSentiment: (kvSentiment.overallSentiment as string) || 'neutral',
+        sentimentScore: (kvSentiment.sentimentScore as number) || 0,
+        interestRateOutlook: (kvSentiment.interestRateOutlook as string) || 'stable',
+        housingSupplyOutlook: (kvSentiment.housingSupplyOutlook as string) || 'stable',
+        demandOutlook: (kvSentiment.demandOutlook as string) || 'moderate',
+        keyThemes: (kvSentiment.keyThemes as string[]) || [],
+        policyRisks: (kvSentiment.policyRisks as string[]) || [],
+        opportunities: (kvSentiment.opportunities as string[]) || [],
+      }
+    : cacheSentiment;
 
   // Get key migration data
   const migrationContext = INTERSTATE_MIGRATION_DATA;
@@ -150,6 +184,12 @@ export async function synthesise(
               policyRisks: marketSentiment.policyRisks,
             }
           : null,
+        infrastructureAlerts: kvInfraAlerts.slice(0, 5).map((a) => ({
+          project: a.project,
+          location: a.location,
+          impact: a.impact,
+          urgency: a.urgency,
+        })),
       },
     },
     null,
