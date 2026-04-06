@@ -338,7 +338,7 @@ export default function WizardPage() {
   const canProceed = () => {
     if (step === 1) return !!answers.budget;
     if (step === 2) return !!answers.purpose;
-    if (step === 3) return (!!answers.targetState && !!answers.location.trim()) || answers.openToSuggestions;
+    if (step === 3) return !!answers.targetState;
     if (step === 4) return !!answers.propertyType && !!answers.minBedrooms;
     if (step === 5) return !!answers.goal && !!answers.minYield;
     return false;
@@ -621,7 +621,7 @@ export default function WizardPage() {
   const stepContext = [
     "Let's start with your budget",
     "What's the purpose of this purchase?",
-    "Where are you looking to buy?",
+    "Choose your target state",
     "What kind of property suits you?",
     "What matters most to you?",
   ];
@@ -808,7 +808,7 @@ export default function WizardPage() {
             </div>
           )}
 
-          {/* ── Step 3: Location ── */}
+          {/* ── Step 3: State ── */}
           {step === 3 && (
             <div>
               <h1
@@ -821,7 +821,7 @@ export default function WizardPage() {
                   lineHeight: 1.1,
                 }}
               >
-                Which suburbs<br />are you targeting?
+                Which state are you<br />looking to invest in?
               </h1>
               <p
                 style={{
@@ -832,185 +832,28 @@ export default function WizardPage() {
                   lineHeight: 1.6,
                 }}
               >
-                Enter one or more suburbs, or let us suggest the best options for your
-                budget and goals.
+                Our AI will identify the best suburbs for your budget and goals.
               </p>
 
-              {/* State selector */}
-              <select
-                value={answers.targetState}
-                onChange={(e) => {
-                  update("targetState", e.target.value);
-                  update("location", "");
-                }}
-                style={{
-                  width: "100%",
-                  border: "1.5px solid #e8e8ed",
-                  borderRadius: 16,
-                  padding: "16px 22px",
-                  fontSize: 17,
-                  color: answers.targetState ? "#1d1d1f" : "#c0c0c8",
-                  backgroundColor: "#fff",
-                  letterSpacing: "-0.01em",
-                  marginBottom: 20,
-                  appearance: "none",
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2386868b' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "right 20px center",
-                  cursor: "pointer",
-                  ...sf,
-                }}
-              >
-                <option value="" disabled>Select state or territory</option>
-                {STATES.map((st) => (
-                  <option key={st} value={st}>{st}</option>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {[
+                  { label: "QLD", sublabel: "Queensland" },
+                  { label: "NSW", sublabel: "New South Wales" },
+                  { label: "VIC", sublabel: "Victoria" },
+                  { label: "WA", sublabel: "Western Australia" },
+                  { label: "SA", sublabel: "South Australia" },
+                  { label: "TAS", sublabel: "Tasmania" },
+                  { label: "ACT", sublabel: "Australian Capital Territory" },
+                ].map((opt) => (
+                  <OptionCard
+                    key={opt.label}
+                    label={opt.label}
+                    sublabel={opt.sublabel}
+                    selected={answers.targetState === opt.label}
+                    onClick={() => update("targetState", opt.label)}
+                  />
                 ))}
-              </select>
-
-              {/* Suburb chips hint */}
-              {answers.targetState && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    marginBottom: 16,
-                  }}
-                >
-                  {(STATE_SUBURB_CHIPS[answers.targetState] || []).map(
-                    (s) => (
-                      <button
-                        key={s}
-                        onClick={() => {
-                          const current = answers.location.trim();
-                          if (!current.includes(s)) {
-                            update(
-                              "location",
-                              current ? `${current}, ${s}` : s
-                            );
-                          }
-                        }}
-                        style={{
-                          padding: "7px 16px",
-                          borderRadius: 980,
-                          border: "1px solid #e8e8ed",
-                          backgroundColor: "#fafafa",
-                          fontSize: 14,
-                          color: "#1d1d1f",
-                          cursor: "pointer",
-                          transition: "all 0.15s",
-                          ...sf,
-                        }}
-                        onMouseOver={(e) => {
-                          e.currentTarget.style.backgroundColor = "#e8f0fe";
-                          e.currentTarget.style.borderColor = "#0071e3";
-                          e.currentTarget.style.color = "#0071e3";
-                        }}
-                        onMouseOut={(e) => {
-                          e.currentTarget.style.backgroundColor = "#fafafa";
-                          e.currentTarget.style.borderColor = "#e8e8ed";
-                          e.currentTarget.style.color = "#1d1d1f";
-                        }}
-                      >
-                        + {s}
-                      </button>
-                    )
-                  )}
-                </div>
-              )}
-
-              <textarea
-                value={answers.location}
-                onChange={(e) => update("location", e.target.value)}
-                placeholder="e.g. New Farm QLD, Surry Hills NSW, Fitzroy VIC..."
-                rows={4}
-                style={{
-                  width: "100%",
-                  border: "1.5px solid #e8e8ed",
-                  borderRadius: 16,
-                  padding: "18px 22px",
-                  fontSize: 17,
-                  color: "#1d1d1f",
-                  backgroundColor: "#fff",
-                  resize: "none",
-                  letterSpacing: "-0.01em",
-                  lineHeight: 1.65,
-                  marginBottom: 20,
-                  boxSizing: "border-box",
-                  transition: "border-color 0.2s, box-shadow 0.2s",
-                  ...sf,
-                }}
-                onFocus={(e) => {
-                  e.currentTarget.style.borderColor = "#0071e3";
-                  e.currentTarget.style.boxShadow = "0 0 0 4px rgba(0,113,227,0.1)";
-                }}
-                onBlur={(e) => {
-                  e.currentTarget.style.borderColor = "#e8e8ed";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              />
-
-              {/* Open to suggestions checkbox */}
-              <button
-                onClick={() => update("openToSuggestions", !answers.openToSuggestions)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 14,
-                  cursor: "pointer",
-                  background: "none",
-                  border: "none",
-                  padding: "16px 20px",
-                  borderRadius: 14,
-                  width: "100%",
-                  textAlign: "left",
-                  backgroundColor: answers.openToSuggestions
-                    ? "rgba(0,113,227,0.04)"
-                    : "#fafafa",
-                  transition: "background 0.15s",
-                  ...sf,
-                }}
-              >
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 7,
-                    border: answers.openToSuggestions
-                      ? "none"
-                      : "1.5px solid #d0d0d8",
-                    backgroundColor: answers.openToSuggestions ? "#0071e3" : "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    transition: "all 0.2s",
-                  }}
-                >
-                  {answers.openToSuggestions && (
-                    <svg width={12} height={9} viewBox="0 0 12 9" fill="none">
-                      <path
-                        d="M1 4.5L4.5 8L11 1"
-                        stroke="white"
-                        strokeWidth={1.9}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                </div>
-                <span
-                  style={{
-                    fontSize: 16,
-                    color: answers.openToSuggestions ? "#0071e3" : "#1d1d1f",
-                    letterSpacing: "-0.01em",
-                    fontWeight: answers.openToSuggestions ? 600 : 400,
-                    transition: "color 0.15s",
-                  }}
-                >
-                  I'm open to suburb suggestions based on my budget and goals
-                </span>
-              </button>
+              </div>
             </div>
           )}
 

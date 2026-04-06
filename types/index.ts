@@ -83,6 +83,13 @@ export interface FinalReport {
   generatedAt: string;
 }
 
+export interface MultiPropertyReport {
+  recommendedSuburbs: string[];
+  suburbReasoning: string;
+  properties: FinalReport[];
+  generatedAt: string;
+}
+
 // Legacy types retained for backwards compatibility
 export interface PropertyData {
   address: string;

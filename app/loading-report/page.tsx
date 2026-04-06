@@ -71,25 +71,35 @@ export default function LoadingReportPage() {
     hasFetched.current = true;
 
     const raw = typeof window !== "undefined" ? localStorage.getItem("ys_wizard") : null;
-    let searchAddress = "14 Langshaw Street, New Farm QLD 4005";
+    let requestBody: Record<string, string> = { address: "New Farm, QLD, Australia" };
+
     if (raw) {
       try {
         const answers = JSON.parse(raw);
-        if (answers.location?.trim()) {
+        if (answers.targetState) {
+          // State-based search — AI picks suburbs
+          requestBody = {
+            state: answers.targetState,
+            budget: answers.budget || "",
+            purpose: answers.purpose || "",
+            propertyType: answers.propertyType || "",
+            bedrooms: answers.minBedrooms || "",
+            yieldTarget: answers.minYield || "",
+            goal: answers.goal || "",
+          };
+        } else if (answers.location?.trim()) {
           const state = answers.targetState || "QLD";
-          const firstSuburb = answers.location.split(",")[0].trim();
-          // Build a full address string that Google Maps can geocode
-          searchAddress = `${firstSuburb}, ${state}, Australia`;
+          requestBody = { address: `${answers.location.split(",")[0].trim()}, ${state}, Australia` };
         }
       } catch { /* ignore */ }
     }
 
-    console.log("[loading-report] Sending address to analyse:", searchAddress);
+    console.log("[loading-report] Sending to analyse:", requestBody);
 
     fetch("/api/analyse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: searchAddress }),
+      body: JSON.stringify(requestBody),
     })
       .then((r) => r.json())
       .then((report) => {

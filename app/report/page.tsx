@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { FinalReport } from "@/types";
+import type { FinalReport, MultiPropertyReport } from "@/types";
 
 const sf = {
   fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -282,6 +282,7 @@ function fmt(n: number | null | undefined, prefix = "", suffix = "") {
 
 export default function ReportPage() {
   const [report, setReport] = useState<FinalReport | null>(null);
+  const [multiReport, setMultiReport] = useState<MultiPropertyReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadHovered, setDownloadHovered] = useState(false);
 
@@ -293,8 +294,16 @@ export default function ReportPage() {
     }
     try {
       const parsed = JSON.parse(raw);
-      if (parsed.error) setError(parsed.error);
-      else setReport(parsed);
+      if (parsed.error) {
+        setError(parsed.error);
+      } else if (parsed.properties && Array.isArray(parsed.properties)) {
+        // Multi-property report
+        setMultiReport(parsed as MultiPropertyReport);
+        // Set first property as the "main" report for backwards compatibility
+        if (parsed.properties.length > 0) setReport(parsed.properties[0]);
+      } else {
+        setReport(parsed as FinalReport);
+      }
     } catch {
       setError("Failed to load report data.");
     }
@@ -539,6 +548,54 @@ export default function ReportPage() {
           padding: "40px 24px 100px",
         }}
       >
+        {/* ── SUBURB RECOMMENDATIONS (multi-property only) ── */}
+        {multiReport && (
+          <div
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 22,
+              padding: "32px 28px",
+              marginBottom: 16,
+              boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
+            }}
+          >
+            <p style={{ fontSize: 12, fontWeight: 700, color: "#0071e3", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14, ...sf }}>
+              AI-selected suburbs
+            </p>
+            <h2 style={{ fontSize: 24, fontWeight: 700, color: "#1d1d1f", letterSpacing: "-0.03em", marginBottom: 16, ...sf }}>
+              Why these suburbs?
+            </h2>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
+              {multiReport.recommendedSuburbs.map((suburb) => (
+                <span
+                  key={suburb}
+                  style={{
+                    display: "inline-block",
+                    padding: "8px 18px",
+                    borderRadius: 980,
+                    backgroundColor: "#f0f0f5",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    color: "#1d1d1f",
+                    letterSpacing: "-0.01em",
+                    ...sf,
+                  }}
+                >
+                  {suburb}
+                </span>
+              ))}
+            </div>
+            <p style={{ fontSize: 16, color: "#444", lineHeight: 1.7, margin: 0, ...sf }}>
+              {multiReport.suburbReasoning}
+            </p>
+            {multiReport.properties.length > 1 && (
+              <p style={{ fontSize: 14, color: "#86868b", marginTop: 16, marginBottom: 0, ...sf }}>
+                {multiReport.properties.length} properties analysed and ranked by investment score
+              </p>
+            )}
+          </div>
+        )}
+
         {/* ── PROPERTY HERO CARD ── */}
         <div
           style={{
