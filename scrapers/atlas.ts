@@ -46,7 +46,7 @@ function buildCandidateUrls(suburb: string, state: string, section: "housing" | 
   // Try council slugs first, then the suburb slug itself
   const candidates = [...councilSlugs, suburbSlug];
   // Deduplicate
-  const unique = [...new Set(candidates)];
+  const unique = Array.from(new Set(candidates));
   return unique.map((slug) => `${BASE_URL}/${slug}/${section}`);
 }
 
