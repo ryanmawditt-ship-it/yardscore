@@ -1,22 +1,22 @@
 /**
  * YARDSCORE PERSISTENT KNOWLEDGE STORE
  * ============================================================
- * Stores research intelligence in Vercel KV (Redis) so data
+ * Stores research intelligence in Upstash Redis so data
  * persists across research runs and server restarts.
  *
- * To set up Vercel KV:
- * 1. Go to vercel.com/dashboard
- * 2. Click Storage tab
- * 3. Create new KV database
- * 4. Connect to yardscore project
- * 5. Vercel automatically adds KV_URL, KV_REST_API_URL,
- *    KV_REST_API_TOKEN to environment variables
+ * Requires KV_REST_API_URL and KV_REST_API_TOKEN env vars
+ * (set automatically when connecting Upstash via Vercel).
  *
- * Falls back gracefully to in-memory cache when KV is not configured.
+ * Falls back gracefully to in-memory cache when not configured.
  * ============================================================
  */
 
-import { kv } from '@vercel/kv'
+import { Redis } from '@upstash/redis'
+
+const kv = new Redis({
+  url: process.env.KV_REST_API_URL!,
+  token: process.env.KV_REST_API_TOKEN!,
+})
 
 function isKvConfigured(): boolean {
   return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
