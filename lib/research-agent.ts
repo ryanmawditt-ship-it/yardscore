@@ -172,6 +172,47 @@ RISK SIGNALS:
 - Oversupply warnings from developers
 - Building company collapses affecting settlements`
 
+/** Sort articles by source priority and take the top N most relevant */
+function prioritiseArticles(items: FeedItem[], limit: number): FeedItem[] {
+  function getSourcePriority(source: string): number {
+    // Priority 1: Google News property-specific searches
+    if (source.includes('news.google.com') && (
+      source.includes('property') || source.includes('real+estate') ||
+      source.includes('housing') || source.includes('infrastructure')
+    )) return 1
+    // Priority 2: Property media blogs
+    if (source.includes('propertyupdate') || source.includes('realestate.com.au') ||
+        source.includes('propertyology') || source.includes('propertychat') ||
+        source.includes('yourinvestmentproperty') || source.includes('apimagazine') ||
+        source.includes('eliteagent') || source.includes('microburbs')) return 2
+    // Priority 3: Government and economic sources
+    if (source.includes('treasury') || source.includes('rba.gov') ||
+        source.includes('investing.com') || source.includes('gov.au')) return 3
+    // Priority 4: Reddit property discussion
+    if (source.includes('reddit.com')) return 4
+    // Priority 5: General news
+    return 5
+  }
+
+  return [...items]
+    .sort((a, b) => getSourcePriority(a.source) - getSourcePriority(b.source))
+    .slice(0, limit)
+}
+
+/** Call Claude with a timeout wrapper */
+async function askClaudeWithTimeout(system: string, user: string, timeoutMs: number): Promise<string> {
+  return Promise.race([
+    askClaude(system, user),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Claude call timed out after ${timeoutMs}ms`)), timeoutMs)
+    ),
+  ])
+}
+
+const BATCH_SIZE = 10
+const MAX_ARTICLES = 50
+const BATCH_TIMEOUT_MS = 30_000
+
 async function extractIntelligence(items: FeedItem[]): Promise<Array<{
   title: string
   summary: string
@@ -182,14 +223,11 @@ async function extractIntelligence(items: FeedItem[]): Promise<Array<{
 }>> {
   if (items.length === 0) return []
 
-  // Batch items into chunks of 20 for Claude processing
-  const chunks: FeedItem[][] = []
-  for (let i = 0; i < items.length; i += 20) {
-    chunks.push(items.slice(i, i + 20))
-  }
+  // Prioritise and limit articles
+  const prioritised = prioritiseArticles(items, MAX_ARTICLES)
+  const totalBatches = Math.ceil(prioritised.length / BATCH_SIZE)
+  console.log(`[research] Processing ${prioritised.length} priority articles in ${totalBatches} batches of ${BATCH_SIZE}`)
 
-  // Process up to 5 chunks to stay within reasonable API usage
-  const chunksToProcess = chunks.slice(0, 5)
   const allInsights: Array<{
     title: string
     summary: string
@@ -199,10 +237,14 @@ async function extractIntelligence(items: FeedItem[]): Promise<Array<{
     category: string
   }> = []
 
-  for (const chunk of chunksToProcess) {
+  for (let i = 0; i < prioritised.length; i += BATCH_SIZE) {
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1
+    const batch = prioritised.slice(i, i + BATCH_SIZE)
+    console.log(`[research] Processing batch ${batchNum} of ${totalBatches} (${batch.length} articles)`)
+
     try {
-      const articlesText = chunk.map((item, i) =>
-        `[${i + 1}] ${item.title}\n${item.description}\nSource: ${item.source}`
+      const articlesText = batch.map((item, idx) =>
+        `[${idx + 1}] ${item.title}\n${item.description}\nSource: ${item.source}`
       ).join('\n\n')
 
       const userContent = `Extract property investment intelligence from these articles.
@@ -224,13 +266,14 @@ Return a JSON array where each object has:
 
 Only include insights relevant to Australian property investment. Skip generic or irrelevant articles.`
 
-      const text = await askClaude(EXTRACTION_SYSTEM_PROMPT, userContent)
+      const text = await askClaudeWithTimeout(EXTRACTION_SYSTEM_PROMPT, userContent, BATCH_TIMEOUT_MS)
       const parsed = JSON.parse(text)
       if (Array.isArray(parsed)) {
+        console.log(`[research] Batch ${batchNum}: extracted ${parsed.length} insights`)
         allInsights.push(...parsed)
       }
     } catch (e) {
-      console.error('[research] Intelligence extraction failed for chunk:', e instanceof Error ? e.message : String(e))
+      console.error(`[research] Batch ${batchNum} failed:`, e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -251,13 +294,13 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
   console.log(`[research] Fetched ${allItems.length} articles from ${successful}/${scanned} feeds`)
 
   // Step 2: Council DA monitoring (parallel with intelligence extraction)
-  console.log('[research] Step 2: Monitoring council DAs...')
+  console.log('[research] Step 2: Extracting intelligence + monitoring council DAs...')
   const [daInsights, rawInsights] = await Promise.all([
     monitorCouncilDAs(),
     extractIntelligence(allItems),
   ])
   console.log(`[research] Scanned ${daInsights.length} council DA portals`)
-  console.log(`[research] Extracted ${rawInsights.length} raw insights`)
+  console.log(`[research] Extracted ${rawInsights.length} raw insights from ${Math.min(allItems.length, MAX_ARTICLES)} priority articles`)
 
   // Step 3: News sentiment analysis
   console.log('[research] Step 3: Analyzing news sentiment...')

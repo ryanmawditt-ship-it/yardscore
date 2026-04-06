@@ -3,7 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const MODEL = "claude-sonnet-4-20250514";
-const MAX_TOKENS = 1500;
+const MAX_TOKENS = 4096;
 const API_URL = "https://api.anthropic.com/v1/messages";
 
 /**
