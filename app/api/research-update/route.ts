@@ -1,0 +1,56 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { runFullResearchCycle } from '@/lib/research-agent'
+
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300 // 5 minutes max for research cycle
+
+export async function POST(request: NextRequest) {
+  // Verify cron secret or admin key
+  const authHeader = request.headers.get('authorization')
+  const cronSecret = process.env.CRON_SECRET
+  const adminKey = process.env.ADMIN_KEY
+
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && authHeader !== `Bearer ${adminKey}`) {
+    // Also check x-admin-key header
+    const xAdminKey = request.headers.get('x-admin-key')
+    if (xAdminKey !== adminKey) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
+
+  try {
+    console.log('[api/research-update] Starting research cycle...')
+    const result = await runFullResearchCycle()
+
+    return NextResponse.json({
+      success: true,
+      summary: {
+        feedsScanned: result.feedsScanned,
+        feedsSuccessful: result.feedsSuccessful,
+        articlesFound: result.articlesFound,
+        insightsExtracted: result.insights.length,
+        councilDAsScanned: result.daInsights.length,
+        sentiment: result.sentiment.overallSentiment,
+        sentimentScore: result.sentiment.sentimentScore,
+        sourcesMonitored: result.sourcesMonitored,
+        durationMs: result.durationMs,
+        completedAt: result.completedAt,
+      },
+      insights: result.insights.slice(0, 50),
+      daInsights: result.daInsights,
+      sentiment: result.sentiment,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[api/research-update] Research cycle failed:', message)
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    status: 'Research update endpoint active',
+    method: 'POST to trigger a research cycle',
+    auth: 'Include Authorization: Bearer <CRON_SECRET> or x-admin-key header',
+  })
+}
