@@ -1,6 +1,7 @@
 import { GeocodedProperty, PropertyAnalysis, YieldAnalysis } from "@/types";
 import { getSuburbData } from "@/scrapers/sqm";
 import { scrapeRentalListings } from "@/scrapers/onthehouse";
+import { findSuburbPick } from "@/lib/investment-intelligence";
 import { askClaude } from "@/lib/claude";
 
 const SYSTEM_PROMPT =
@@ -20,6 +21,9 @@ export async function analyseYield(
 ): Promise<YieldAnalysis> {
   const bedrooms = analysis.bedrooms ?? 3;
 
+  // Get intelligence data for this suburb if available
+  const intelligence = findSuburbPick(property.suburb, property.state);
+
   const [sqmData, rentalListings] = await Promise.all([
     getSuburbData(property.suburb, property.state, property.postcode),
     scrapeRentalListings(property.suburb, bedrooms),
@@ -32,11 +36,16 @@ export async function analyseYield(
         )
       : null;
 
-  // Estimate a property price from comparables or median
   const estimatedPrice = analysis.lastSalePrice
     ?? (analysis.medianPricePerSqm && analysis.landSize
       ? analysis.medianPricePerSqm * analysis.landSize
       : null);
+
+  // Build fallback data from intelligence
+  const fallbackRent = intelligence?.medianWeeklyRent ?? sqmData.medianAskingRentHouse ?? 550;
+  const fallbackVacancy = intelligence?.vacancyRate ?? sqmData.vacancyRatePct ?? 1.5;
+  const fallbackYield = intelligence?.grossYield ?? 5.0;
+  const fallbackPrice = intelligence?.medianHousePrice ?? 600000;
 
   const userContent = JSON.stringify(
     {
@@ -45,13 +54,21 @@ export async function analyseYield(
       state: property.state,
       bedrooms,
       lastSalePrice: analysis.lastSalePrice,
-      estimatedPrice,
+      estimatedPrice: estimatedPrice ?? fallbackPrice,
       averageWeeklyRent,
       rentalListingsCount: rentalListings.length,
       sqmData,
+      intelligenceData: intelligence ? {
+        medianWeeklyRent: intelligence.medianWeeklyRent,
+        grossYield: intelligence.grossYield,
+        vacancyRate: intelligence.vacancyRate,
+        medianHousePrice: intelligence.medianHousePrice,
+      } : null,
       fallbackEstimates: {
-        weeklyRent: sqmData.medianAskingRentHouse ?? 550,
-        vacancyRatePct: sqmData.vacancyRatePct ?? 1.5,
+        weeklyRent: fallbackRent,
+        vacancyRatePct: fallbackVacancy,
+        grossYieldPct: fallbackYield,
+        estimatedPropertyPrice: fallbackPrice,
         note: "Use these fallback values if scraper data is null. Always return numbers, never null.",
       },
     },

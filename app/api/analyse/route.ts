@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 import { geocodeAddress } from "@/lib/geocode";
-import { selectBestSuburbs, getSuburbReasoning } from "@/agents/suburb-selector";
+import { selectBestSuburbs } from "@/agents/suburb-selector";
 import { discoverProperties } from "@/agents/discovery";
 import { analyseProperty } from "@/agents/step4-property";
 import { analyseRisk } from "@/agents/step5-risk";
@@ -191,11 +191,15 @@ async function analyseSingleProperty(address: string): Promise<FinalReport | nul
 // ---------------------------------------------------------------------------
 
 function parseBudget(budget: string): number {
+  // Check ranges first (most specific), then single values
   if (budget.includes("1.5M+")) return 2000000;
-  if (budget.includes("1M")) return 1500000;
-  if (budget.includes("750k")) return 1000000;
+  if (budget.includes("1M") && budget.includes("1.5M")) return 1500000;
+  if (budget.includes("1M")) return 1000000;
+  if (budget.includes("750k") && budget.includes("1M")) return 1000000;
   if (budget.includes("500k") && budget.includes("750k")) return 750000;
-  if (budget.includes("500k")) return 750000;
+  if (budget.includes("750k")) return 750000;
+  if (budget.includes("500k")) return 500000;
+  if (budget.includes("Under")) return 500000;
   const match = budget.match(/[\d,.]+/);
   if (match) return parseInt(match[0].replace(/[,]/g, ""), 10);
   return 750000;
@@ -244,15 +248,15 @@ export async function POST(request: NextRequest) {
     console.log(`[api] State-based search: ${state}, budget: $${budget}, goal: ${primaryGoal}`);
 
     try {
-      // Step 1: AI selects best suburbs
+      // Step 1: Select best suburbs from intelligence data
       console.log("[api] Step 1: Selecting best suburbs...");
-      const suburbs = await selectBestSuburbs(state, budget, purpose, propertyType, bedrooms, yieldTarget, primaryGoal);
-      console.log(`[api] Step 1 completed in ${Date.now() - startTime}ms — suburbs:`, suburbs);
+      const selection = await selectBestSuburbs(state, budget, purpose, propertyType, bedrooms, yieldTarget, primaryGoal);
+      console.log(`[api] Step 1 completed in ${Date.now() - startTime}ms — suburbs:`, selection.suburbs);
 
       // Step 2: Discover 2 properties per suburb
       console.log("[api] Step 2: Discovering properties...");
       const discoveryResults = await Promise.all(
-        suburbs.map((suburb) => discoverProperties(suburb, state, budget, bedrooms, propertyType))
+        selection.suburbs.map((suburb) => discoverProperties(suburb, state, budget, bedrooms, propertyType))
       );
       const allAddresses = discoveryResults.flat();
       console.log(`[api] Step 2 completed in ${Date.now() - startTime}ms — ${allAddresses.length} addresses`);
@@ -274,14 +278,11 @@ export async function POST(request: NextRequest) {
       reports.sort((a, b) => b.overallScore - a.overallScore);
       const topReports = reports.slice(0, 5);
 
-      // Step 5: Get suburb reasoning
-      console.log("[api] Step 4: Getting suburb reasoning...");
-      const suburbReasoning = await getSuburbReasoning(state, suburbs, budget, purpose, primaryGoal);
       console.log(`[api] Pipeline completed in ${Date.now() - startTime}ms`);
 
       const response: MultiPropertyReport = {
-        recommendedSuburbs: suburbs,
-        suburbReasoning,
+        recommendedSuburbs: selection.suburbs,
+        suburbReasoning: selection.reasoning,
         properties: topReports,
         generatedAt: new Date().toISOString(),
       };

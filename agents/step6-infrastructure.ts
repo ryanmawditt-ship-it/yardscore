@@ -72,13 +72,25 @@ async function fetchTmrProjects(suburb: string): Promise<TmrProject[]> {
 export async function analyseInfrastructure(
   property: GeocodedProperty
 ): Promise<InfrastructureAnalysis> {
+  const { findSuburbPick } = await import("@/lib/investment-intelligence");
+  const intelligence = findSuburbPick(property.suburb, property.state);
+
   const [supplyDemand, tmrProjects] = await Promise.all([
     getSupplyDemand(property.suburb, property.state),
     fetchTmrProjects(property.suburb).catch(() => [] as TmrProject[]),
   ]);
 
   const userContent = JSON.stringify(
-    { address: property.address, suburb: property.suburb, supplyDemand, tmrProjects },
+    {
+      address: property.address,
+      suburb: property.suburb,
+      state: property.state,
+      supplyDemand,
+      tmrProjects,
+      knownInfrastructureProjects: intelligence?.infrastructureProjects ?? [],
+      suburbSupplyDemand: intelligence?.supplyDemand ?? null,
+      suburbDemographics: intelligence?.demographics ?? null,
+    },
     null,
     2
   );

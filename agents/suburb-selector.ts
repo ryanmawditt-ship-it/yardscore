@@ -1,9 +1,10 @@
-import { askClaude } from "@/lib/claude";
+import { getTopPicksForBudget, SuburbPick } from "@/lib/investment-intelligence";
 
-const SYSTEM_PROMPT =
-  "You are an expert Australian property investment analyst. " +
-  "You recommend suburbs strictly within the client's budget based on current market conditions. " +
-  "Return ONLY a valid JSON array of exactly 3 suburb name strings. No explanations.";
+export interface SuburbSelection {
+  suburbs: string[];
+  reasoning: string;
+  picks: SuburbPick[];
+}
 
 export async function selectBestSuburbs(
   state: string,
@@ -13,54 +14,41 @@ export async function selectBestSuburbs(
   bedrooms: number,
   yieldTarget: number,
   primaryGoal: string
-): Promise<string[]> {
-  const lowEnd = Math.round(maxBudget * 0.6);
+): Promise<SuburbSelection> {
+  const picks = getTopPicksForBudget(state, maxBudget);
 
-  const userContent = `A client wants to buy in ${state} with a MAXIMUM budget of $${maxBudget.toLocaleString()}.
+  if (!picks || picks.length === 0) {
+    console.log(`[suburb-selector] No intelligence data for ${state} at budget $${maxBudget.toLocaleString()}, using QLD defaults`);
+    return {
+      suburbs: ["Bundaberg", "Caboolture", "Ipswich"],
+      reasoning: "These suburbs offer strong investment fundamentals within your budget.",
+      picks: [],
+    };
+  }
 
-CRITICAL: Only recommend suburbs where the median house price is BELOW $${maxBudget.toLocaleString()}. This is a hard requirement. Do not recommend any suburb where properties typically sell above this budget.
+  // Sort by the user's primary goal
+  const sorted = [...picks].sort((a, b) => {
+    if (primaryGoal.toLowerCase().includes("yield")) return b.yieldScore - a.yieldScore;
+    if (primaryGoal.toLowerCase().includes("growth")) return b.growthScore - a.growthScore;
+    return b.yieldScore + b.growthScore - (a.yieldScore + a.growthScore);
+  });
 
-For a budget of $${maxBudget.toLocaleString()}, focus on suburbs where ${bedrooms} bedroom ${propertyType.toLowerCase()}s regularly sell between $${lowEnd.toLocaleString()} and $${maxBudget.toLocaleString()}.
+  const top3 = sorted.slice(0, 3);
 
-Client criteria:
-- Maximum budget: $${maxBudget.toLocaleString()}
-- Purpose: ${purpose}
-- Property type: ${propertyType}
-- Minimum bedrooms: ${bedrooms}
-- Primary goal: ${primaryGoal}
-- Minimum yield target: ${yieldTarget}%
-
-Recommend exactly 3 suburbs that match ALL criteria, especially the budget.
-Return ONLY a JSON array: ["Suburb1", "Suburb2", "Suburb3"]`;
-
-  console.log(`[suburb-selector] Selecting 3 suburbs in ${state} for budget $${maxBudget.toLocaleString()}`);
-
-  const response = await askClaude(SYSTEM_PROMPT, userContent);
-  const suburbs = JSON.parse(response) as string[];
-
-  console.log(`[suburb-selector] Recommended suburbs:`, suburbs);
-
-  return suburbs.slice(0, 3);
-}
-
-export async function getSuburbReasoning(
-  state: string,
-  suburbs: string[],
-  maxBudget: number,
-  purpose: string,
-  primaryGoal: string
-): Promise<string> {
-  const userContent = `You recommended these 3 suburbs in ${state} for a property investor:
-${suburbs.map((s, i) => `${i + 1}. ${s}`).join("\n")}
-
-Their criteria: budget $${maxBudget.toLocaleString()}, purpose: ${purpose}, goal: ${primaryGoal}.
-
-Write a 2-3 sentence explanation of why these suburbs were selected. Mention the typical price range in each suburb to confirm they fit the budget. Be specific about each suburb's investment strengths. Do not use markdown formatting like **bold** — write plain text only.`;
-
-  const response = await askClaude(
-    "You are an Australian property investment analyst. Write concise, specific suburb recommendations in plain text without any markdown formatting.",
-    userContent
+  console.log(
+    `[suburb-selector] Selected ${top3.map((p) => p.suburb).join(", ")} in ${state} for budget $${maxBudget.toLocaleString()}`
   );
 
-  return response;
+  const reasoning = top3
+    .map(
+      (p) =>
+        `${p.suburb} (median $${p.medianHousePrice.toLocaleString()}, yield ${p.grossYield}%): ${p.rationale}`
+    )
+    .join("\n\n");
+
+  return {
+    suburbs: top3.map((p) => p.suburb),
+    reasoning,
+    picks: top3,
+  };
 }
