@@ -1,12 +1,9 @@
 import { askClaude } from "@/lib/claude";
 import { searchListings, type DomainListing } from "@/lib/domain-api";
+import { getRealListings, type HomelyListing } from "@/scrapers/homely";
 import { findSuburbPick } from "@/lib/investment-intelligence";
 
-const SYSTEM_PROMPT =
-  "You are an Australian real estate data assistant. " +
-  "Generate realistic residential property addresses that could plausibly be for sale. " +
-  "Use real street names from the suburb. Include the correct postcode. " +
-  "Return ONLY a valid JSON array of address strings. No explanations.";
+// ── Photo mapping ──
 
 const SUBURB_PHOTOS: Record<string, string> = {
   redcliffe: "https://images.unsplash.com/photo-1599940824399-b87987ceb72a?w=800&q=80",
@@ -56,16 +53,65 @@ export function buildListingSearchUrl(
   return `https://www.realestate.com.au/buy/in-${suburbSlug},+${stateSlug}+${postcode}/list-1?propertyTypes=${typeParam}&numBeds-min=${bedrooms}&price-max=${maxBudget}`;
 }
 
-export interface DiscoveredProperty {
-  address: string;
-  domainListing?: DomainListing;
-  source: "domain" | "ai-generated";
+// ── Listing metadata cache (enriches FinalReport after analysis) ──
+
+export interface ListingMeta {
+  listingUrl: string;
+  photoUrl: string | null;
+  price: number | null;
+  priceDisplay: string;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  source: "homely" | "view" | "domain" | "ai-generated" | "fallback";
 }
 
-/**
- * Discovers properties in a suburb. Tries Domain API first for real listings,
- * falls back to AI-generated addresses if Domain returns no results.
- */
+const listingMetaCache = new Map<string, ListingMeta>();
+
+export function getCachedListingMeta(address: string): ListingMeta | null {
+  // Try exact match first, then partial match on street number + name
+  if (listingMetaCache.has(address)) return listingMetaCache.get(address)!;
+  const streetPart = address.split(",")[0]?.trim().toLowerCase();
+  const entries = Array.from(listingMetaCache.entries());
+  for (let i = 0; i < entries.length; i++) {
+    const [key, val] = entries[i];
+    if (key.toLowerCase().includes(streetPart) || streetPart.includes(key.split(",")[0]?.trim().toLowerCase())) {
+      return val;
+    }
+  }
+  return null;
+}
+
+export function getCachedDomainListings(suburb: string): DomainListing[] {
+  // Kept for backwards compat — returns empty now
+  return [];
+}
+
+// ── Hardcoded fallback addresses ──
+
+const FALLBACK_ADDRESSES: Record<string, string[]> = {
+  redcliffe: ["128 Anzac Ave, Redcliffe QLD 4020", "45 Sutton St, Redcliffe QLD 4020", "12 Henzell St, Redcliffe QLD 4020"],
+  "north lakes": ["28 Endeavour Blvd, North Lakes QLD 4509", "15 Lakefield Dr, North Lakes QLD 4509", "42 Caloundra Rd, North Lakes QLD 4509"],
+  ipswich: ["24 Brisbane St, Ipswich QLD 4305", "8 Nicholas St, Ipswich QLD 4305", "33 Limestone St, Ipswich QLD 4305"],
+  caboolture: ["15 King St, Caboolture QLD 4510", "8 Beerburrum Rd, Caboolture QLD 4510"],
+  narangba: ["12 Grays Rd, Narangba QLD 4504", "5 Buckley Rd, Narangba QLD 4504"],
+  bundaberg: ["45 Bourbong St, Bundaberg QLD 4670", "12 Barolin St, Bundaberg QLD 4670"],
+  rockhampton: ["24 East St, Rockhampton QLD 4700", "15 Quay St, Rockhampton QLD 4700"],
+  toowoomba: ["24 Ruthven St, Toowoomba QLD 4350", "15 Margaret St, Toowoomba QLD 4350"],
+  parramatta: ["15 Church St, Parramatta NSW 2150", "8 Marsden St, Parramatta NSW 2150"],
+  penrith: ["12 High St, Penrith NSW 2750", "24 Henry St, Penrith NSW 2750"],
+  wollongong: ["15 Crown St, Wollongong NSW 2500", "8 Keira St, Wollongong NSW 2500"],
+  footscray: ["12 Barkly St, Footscray VIC 3011", "45 Hopkins St, Footscray VIC 3011"],
+  sunshine: ["15 Hampshire Rd, Sunshine VIC 3020", "8 Devonshire Rd, Sunshine VIC 3020"],
+  werribee: ["12 Watton St, Werribee VIC 3030", "24 Cherry St, Werribee VIC 3030"],
+  melton: ["15 High St, Melton VIC 3337", "8 McKenzie St, Melton VIC 3337"],
+  ballarat: ["12 Sturt St, Ballarat VIC 3350", "24 Dana St, Ballarat VIC 3350"],
+  geelong: ["15 Moorabool St, Geelong VIC 3220", "8 Malop St, Geelong VIC 3220"],
+  maylands: ["15 Eighth Ave, Maylands WA 6051", "8 Whatley Cres, Maylands WA 6051"],
+  prospect: ["12 Prospect Rd, Prospect SA 5082", "24 Main North Rd, Prospect SA 5082"],
+};
+
+// ── Main discovery function ──
+
 export async function discoverProperties(
   suburb: string,
   state: string,
@@ -73,50 +119,102 @@ export async function discoverProperties(
   bedrooms: number,
   propertyType: string
 ): Promise<string[]> {
-  // Look up postcode from intelligence data
   const pick = findSuburbPick(suburb, state);
   const postcode = pick?.postcode ?? "";
+  const stateMap: Record<string, string> = { QLD: "queensland", NSW: "new-south-wales", VIC: "victoria", WA: "western-australia", SA: "south-australia" };
+  const stateName = stateMap[state] || state.toLowerCase();
+  const suburbSlug = suburb.toLowerCase().replace(/\s+/g, "-");
 
-  // Try Domain API first
-  const domainListings = await searchListings({
-    suburb,
-    state,
-    postcode,
-    propertyTypes: propertyType.toLowerCase() === "any" ? ["House", "Townhouse"] : [propertyType],
-    minBedrooms: bedrooms,
-    maxPrice: maxBudget,
-    limit: 2,
-  });
-
-  if (domainListings.length > 0) {
-    console.log(`[discovery] Found ${domainListings.length} REAL listings from Domain API for ${suburb}`);
-    // Store listings for later use by the pipeline
-    domainListingCache.set(suburb.toLowerCase(), domainListings);
-    return domainListings.map((l) => l.address);
+  // 1. Try Homely / View scrapers
+  const realListings = await getRealListings(suburb, state, maxBudget, bedrooms, propertyType);
+  if (realListings.length > 0) {
+    console.log(`[discovery] Got ${realListings.length} REAL listings from scrapers for ${suburb}`);
+    const selected = realListings.slice(0, 2);
+    for (const l of selected) {
+      listingMetaCache.set(l.address, {
+        listingUrl: l.listingUrl,
+        photoUrl: l.photoUrl,
+        price: l.price,
+        priceDisplay: l.priceDisplay,
+        bedrooms: l.bedrooms,
+        bathrooms: l.bathrooms,
+        source: l.listingUrl.includes("view.com.au") ? "view" : "homely",
+      });
+    }
+    return selected.map((l) => l.address);
   }
 
-  // Fall back to AI-generated addresses
-  console.log(`[discovery] No Domain results for ${suburb}, generating AI addresses`);
-  const userContent = `Generate 2 realistic residential property addresses for sale in ${suburb}, ${state}, Australia with asking price under $${maxBudget.toLocaleString()}.
+  // 2. Try Domain API
+  if (process.env.DOMAIN_CLIENT_ID) {
+    try {
+      const domainListings = await searchListings({
+        suburb,
+        state,
+        postcode,
+        propertyTypes: propertyType.toLowerCase() === "any" ? ["House", "Townhouse"] : [propertyType],
+        minBedrooms: bedrooms,
+        maxPrice: maxBudget,
+        limit: 2,
+      });
+      if (domainListings.length > 0) {
+        console.log(`[discovery] Got ${domainListings.length} Domain API listings for ${suburb}`);
+        for (const l of domainListings) {
+          listingMetaCache.set(l.address, {
+            listingUrl: l.listingUrl,
+            photoUrl: l.imageUrl,
+            price: l.priceNumeric,
+            priceDisplay: l.price,
+            bedrooms: l.bedrooms,
+            bathrooms: l.bathrooms,
+            source: "domain",
+          });
+        }
+        return domainListings.map((l) => l.address);
+      }
+    } catch (e) {
+      console.log("[discovery] Domain API failed:", e instanceof Error ? e.message : String(e));
+    }
+  }
 
-Properties must be ${bedrooms}+ bedroom ${propertyType.toLowerCase()}s.
-Use real street names from ${suburb}. Include the correct postcode for ${suburb}, ${state}.
+  // 3. Hardcoded fallback addresses
+  const key = suburb.toLowerCase();
+  const fallbackAddresses = FALLBACK_ADDRESSES[key];
+  if (fallbackAddresses) {
+    console.log(`[discovery] Using ${fallbackAddresses.length} hardcoded fallback addresses for ${suburb}`);
+    const selected = fallbackAddresses.slice(0, 2);
+    const searchUrl = `https://www.homely.com.au/buy/${suburbSlug}-${stateName}/pg-1?maxprice=${maxBudget}&minbeds=${bedrooms}`;
+    for (const addr of selected) {
+      listingMetaCache.set(addr, {
+        listingUrl: searchUrl,
+        photoUrl: null,
+        price: null,
+        priceDisplay: `Under $${maxBudget.toLocaleString()}`,
+        bedrooms,
+        bathrooms: null,
+        source: "fallback",
+      });
+    }
+    return selected;
+  }
 
-Each address must include: street number, street name, suburb, state abbreviation and postcode.
-Return as a JSON array of strings only.
-Example: ["14 Langshaw Street, ${suburb} ${state} ${postcode || "4005"}", "22 Moray Street, ${suburb} ${state} ${postcode || "4005"}"]
-Return only the JSON array, no other text.`;
-
-  const response = await askClaude(SYSTEM_PROMPT, userContent);
+  // 4. Last resort — AI-generated addresses
+  console.log(`[discovery] All sources exhausted for ${suburb}, generating AI addresses`);
+  const response = await askClaude(
+    "You are an Australian real estate data assistant. Return ONLY a valid JSON array of address strings.",
+    `Generate 2 realistic residential property addresses for sale in ${suburb}, ${state} with asking price under $${maxBudget.toLocaleString()}. Properties must be ${bedrooms}+ bedroom ${propertyType.toLowerCase()}s. Use real street names. Include correct postcode. Return JSON array only.`
+  );
   const addresses = JSON.parse(response) as string[];
-
-  console.log(`[discovery] Generated AI addresses for ${suburb}:`, addresses);
+  const searchUrl = `https://www.homely.com.au/buy/${suburbSlug}-${stateName}/pg-1?maxprice=${maxBudget}&minbeds=${bedrooms}`;
+  for (const addr of addresses) {
+    listingMetaCache.set(addr, {
+      listingUrl: searchUrl,
+      photoUrl: null,
+      price: null,
+      priceDisplay: `Under $${maxBudget.toLocaleString()}`,
+      bedrooms,
+      bathrooms: null,
+      source: "ai-generated",
+    });
+  }
   return addresses.slice(0, 2);
-}
-
-// Cache Domain listings for enriching reports later
-const domainListingCache = new Map<string, DomainListing[]>();
-
-export function getCachedDomainListings(suburb: string): DomainListing[] {
-  return domainListingCache.get(suburb.toLowerCase()) ?? [];
 }

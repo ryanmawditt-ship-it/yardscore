@@ -1427,10 +1427,15 @@ export default function ReportPage() {
                 letterSpacing: "-0.01em",
               }}
             >
-              View current listings in {property.suburb} on realestate.com.au →
+              {report.listingSearchUrl?.includes("homely.com.au")
+                ? `View on Homely.com.au — ${property.suburb} →`
+                : report.listingSearchUrl?.includes("view.com.au")
+                ? `View on View.com.au — ${property.suburb} →`
+                : report.listingSearchUrl?.includes("domain.com.au")
+                ? `View on Domain.com.au — ${property.suburb} →`
+                : `Search current listings in ${property.suburb} →`}
             </a>
             <p style={{ fontSize: 12, color: "#86868b", textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
-              Links open realestate.com.au filtered to your criteria.
               Yardscore analyses suburb fundamentals — verify specific listing details independently.
             </p>
           </div>
