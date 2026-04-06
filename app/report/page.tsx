@@ -275,8 +275,8 @@ function Section({
   );
 }
 
-function fmt(n: number | null | undefined, prefix = "", suffix = "") {
-  if (n === null || n === undefined) return "—";
+function fmt(n: number | null | undefined, prefix = "", suffix = "", fallback = "Estimating...") {
+  if (n === null || n === undefined) return fallback;
   return `${prefix}${n.toLocaleString()}${suffix}`;
 }
 
@@ -639,7 +639,7 @@ export default function ReportPage() {
               ))}
             </div>
             <p style={{ fontSize: 16, color: "#444", lineHeight: 1.7, margin: 0, ...sf }}>
-              {multiReport.suburbReasoning}
+              <span dangerouslySetInnerHTML={{ __html: multiReport.suburbReasoning.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
             </p>
             {(multiReport.properties?.length ?? 0) > 1 && (
               <p style={{ fontSize: 14, color: "#86868b", marginTop: 16, marginBottom: 0, ...sf }}>

@@ -18,6 +18,10 @@ const SYSTEM_PROMPT_ESTIMATE =
   "2. Calculate medianPricePerSqm from those estimated comparables. " +
   "3. Write a 2 sentence trendSummary based on your knowledge of this suburb's price trends. " +
   "Be realistic — use your knowledge of actual median prices in this suburb. " +
+  "IMPORTANT: If property details are unavailable from scraping, you MUST estimate realistic values. " +
+  "For bedrooms, bathrooms, landSize, yearBuilt — never return null. Estimate based on the suburb and property type. " +
+  "A typical 3 bedroom house: bedrooms 3, bathrooms 1-2, landSize 400-600sqm, yearBuilt estimated from suburb age. " +
+  "Always return numbers for these fields, not null. " +
   "Return ONLY a valid JSON object matching the PropertyAnalysis TypeScript type. " +
   "No markdown, no explanation, just the JSON object.";
 

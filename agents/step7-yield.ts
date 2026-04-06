@@ -6,9 +6,12 @@ import { askClaude } from "@/lib/claude";
 const SYSTEM_PROMPT =
   "You are a property investment analyst. You will be given rental market data for an Australian suburb. " +
   "Return ONLY a valid JSON object matching the YieldAnalysis type. " +
-  "Calculate grossYieldPct as (weeklyRent * 52 / lastSalePrice) * 100. " +
+  "CRITICAL: Never return null for any numeric field. Always calculate or estimate values. " +
+  "Calculate grossYieldPct as (weeklyRent * 52 / estimatedPrice) * 100. " +
   "Calculate netYieldPct by subtracting 8% management, 1% maintenance, $2000 rates, $1500 insurance annually. " +
   "Calculate cashflowWeekly assuming 80% LVR at 6.5% interest rate. " +
+  "If scraper data is unavailable, use the fallback estimates provided. " +
+  "estimatedWeeklyRent, grossYieldPct, netYieldPct, vacancyRatePct, cashflowWeekly must all be numbers, never null. " +
   "Write a 2 sentence rentalDemandSummary. No markdown, no explanation, just the JSON object.";
 
 export async function analyseYield(
@@ -29,15 +32,28 @@ export async function analyseYield(
         )
       : null;
 
+  // Estimate a property price from comparables or median
+  const estimatedPrice = analysis.lastSalePrice
+    ?? (analysis.medianPricePerSqm && analysis.landSize
+      ? analysis.medianPricePerSqm * analysis.landSize
+      : null);
+
   const userContent = JSON.stringify(
     {
       address: property.address,
       suburb: property.suburb,
+      state: property.state,
       bedrooms,
       lastSalePrice: analysis.lastSalePrice,
+      estimatedPrice,
       averageWeeklyRent,
       rentalListingsCount: rentalListings.length,
       sqmData,
+      fallbackEstimates: {
+        weeklyRent: sqmData.medianAskingRentHouse ?? 550,
+        vacancyRatePct: sqmData.vacancyRatePct ?? 1.5,
+        note: "Use these fallback values if scraper data is null. Always return numbers, never null.",
+      },
     },
     null,
     2
