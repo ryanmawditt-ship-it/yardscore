@@ -1,5 +1,4 @@
-import { execFile } from "child_process";
-import { join } from "path";
+import type { ChildProcess } from "child_process";
 
 export interface SoldListing {
   address: string;
@@ -21,7 +20,9 @@ export async function getSoldListings(
   state: string,
   postcode: string
 ): Promise<SoldListing[]> {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
+    const { execFile } = await import("child_process");
+    const { join } = await import("path");
     const scriptPath = join(process.cwd(), "scripts", "scrape-sold.ts");
     const tsxPath = join(process.cwd(), "node_modules", ".bin", "tsx");
 

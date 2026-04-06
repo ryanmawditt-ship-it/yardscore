@@ -7,6 +7,7 @@ const nextConfig = {
       "playwright",
       "playwright-core",
       "playwright-extra",
+      "puppeteer",
       "puppeteer-extra-plugin-stealth",
     ],
   },

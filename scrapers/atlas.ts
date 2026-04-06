@@ -1,4 +1,4 @@
-import { chromium, Page } from "playwright";
+import type { Page } from "playwright";
 
 const BASE_URL = "https://profile.id.com.au";
 
@@ -320,6 +320,7 @@ export async function getDemographics(
   suburb: string,
   state: string
 ): Promise<DemographicsResult> {
+  const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
 
   try {
