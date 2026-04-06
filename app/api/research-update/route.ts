@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runFullResearchCycle } from '@/lib/research-agent'
+import { setResearchCache } from '@/lib/research-cache'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300 // 5 minutes max for research cycle
@@ -21,6 +22,14 @@ export async function POST(request: NextRequest) {
   try {
     console.log('[api/research-update] Starting research cycle...')
     const result = await runFullResearchCycle()
+
+    // Cache results for use by suburb-selector and synthesis agents
+    setResearchCache({
+      insights: result.insights,
+      sentiment: result.sentiment,
+      updatedAt: result.completedAt,
+    })
+    console.log(`[api/research-update] Cached ${result.insights.length} insights for agent use`)
 
     return NextResponse.json({
       success: true,

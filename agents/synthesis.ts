@@ -17,6 +17,7 @@ import {
   type SuburbProfile,
 } from "@/lib/investors-handbook";
 import { findSuburbPick } from "@/lib/investment-intelligence";
+import { getInsightsForSuburb, getLatestSentiment } from "@/lib/research-cache";
 
 const SYSTEM_PROMPT =
   "You are a senior Australian property investment analyst with access to: " +
@@ -61,6 +62,10 @@ export async function synthesise(
 
   // Get infrastructure pipeline for the state
   const stateInfra = getInfrastructureByState(property.state as State);
+
+  // Get recent research insights for this suburb
+  const recentInsights = getInsightsForSuburb(property.suburb, property.state);
+  const marketSentiment = getLatestSentiment();
 
   // Get key migration data
   const migrationContext = INTERSTATE_MIGRATION_DATA;
@@ -123,6 +128,28 @@ export async function synthesise(
           nationalContext: migrationDriver?.explanation.slice(0, 200),
         },
         supplyContext: supplyShortage?.explanation.slice(0, 200),
+      },
+      // Live research intelligence
+      liveResearch: {
+        recentInsights: recentInsights.slice(0, 5).map((i) => ({
+          title: i.title,
+          summary: i.summary,
+          urgency: i.urgency,
+          impact: i.impact,
+          category: i.category,
+        })),
+        marketSentiment: marketSentiment
+          ? {
+              overall: marketSentiment.overallSentiment,
+              score: marketSentiment.sentimentScore,
+              interestRates: marketSentiment.interestRateOutlook,
+              supply: marketSentiment.housingSupplyOutlook,
+              demand: marketSentiment.demandOutlook,
+              keyThemes: marketSentiment.keyThemes,
+              opportunities: marketSentiment.opportunities,
+              policyRisks: marketSentiment.policyRisks,
+            }
+          : null,
       },
     },
     null,

@@ -7,6 +7,7 @@ import {
   type InvestmentGoal,
   type SuburbProfile,
 } from "@/lib/investors-handbook";
+import { getInsightsForState, getLatestSentiment } from "@/lib/research-cache";
 
 export interface SuburbSelection {
   suburbs: string[];
@@ -87,7 +88,11 @@ export async function selectBestSuburbs(
 
   const top3 = sorted.slice(0, 3);
 
-  // Enrich reasoning with handbook data where available
+  // Get recent research insights for this state
+  const stateInsights = getInsightsForState(state);
+  const sentiment = getLatestSentiment();
+
+  // Enrich reasoning with handbook data and live research
   const reasoning = top3
     .map((p) => {
       const handbookMatch = handbookSuburbs.find(
@@ -97,9 +102,25 @@ export async function selectBestSuburbs(
       if (handbookMatch) {
         text += ` Research data: ${handbookMatch.annualGrowthPercent}% annual growth, vacancy ${handbookMatch.vacancyRate ?? "N/A"}%, ${handbookMatch.daysOnMarket ? handbookMatch.daysOnMarket + " days on market" : ""}. Key drivers: ${handbookMatch.keyDrivers.join(", ")}.`;
       }
+      // Add any recent research insights for this suburb
+      const suburbInsights = stateInsights.filter(
+        (i) => i.suburb?.toLowerCase() === p.suburb.toLowerCase()
+      );
+      if (suburbInsights.length > 0) {
+        text += ` Recent intelligence: ${suburbInsights.map((i) => i.title).join("; ")}.`;
+      }
       return text;
     })
     .join("\n\n");
+
+  // Append market sentiment if available
+  const fullReasoning = sentiment
+    ? `${reasoning}\n\nMarket sentiment: ${sentiment.overallSentiment} (score: ${sentiment.sentimentScore}). Interest rate outlook: ${sentiment.interestRateOutlook}. Supply outlook: ${sentiment.housingSupplyOutlook}. Demand: ${sentiment.demandOutlook}.`
+    : reasoning;
+
+  if (stateInsights.length > 0) {
+    console.log(`[suburb-selector] Enriched with ${stateInsights.length} research insights for ${state}`);
+  }
 
   // Collect matching handbook profiles for the selected suburbs
   const matchedProfiles = top3
@@ -115,7 +136,7 @@ export async function selectBestSuburbs(
 
   return {
     suburbs: top3.map((p) => p.suburb),
-    reasoning,
+    reasoning: fullReasoning,
     picks: top3,
     handbookProfiles: matchedProfiles,
   };
