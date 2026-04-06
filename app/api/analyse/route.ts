@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 import { geocodeAddress } from "@/lib/geocode";
 import { selectBestSuburbs } from "@/agents/suburb-selector";
-import { discoverProperties, getSuburbPhotoUrl, buildListingSearchUrl } from "@/agents/discovery";
+import { discoverProperties, getSuburbPhotoUrl, buildListingSearchUrl, getCachedDomainListings } from "@/agents/discovery";
 import { analyseProperty } from "@/agents/step4-property";
 import { analyseRisk } from "@/agents/step5-risk";
 import { analyseInfrastructure } from "@/agents/step6-infrastructure";
@@ -278,11 +278,24 @@ export async function POST(request: NextRequest) {
       reports.sort((a, b) => b.overallScore - a.overallScore);
       for (const r of reports) {
         if (r.property) {
-          r.suburbPhotoUrl = getSuburbPhotoUrl(r.property.suburb);
-          r.listingSearchUrl = buildListingSearchUrl(
-            r.property.suburb, r.property.state, r.property.postcode,
-            propertyType, bedrooms, budget
+          // Check if we have a real Domain listing for this suburb
+          const domainListings = getCachedDomainListings(r.property.suburb);
+          const matchingListing = domainListings.find(
+            (l) => l.address === r.property.address || r.property.address.includes(l.address.split(",")[0])
           );
+
+          if (matchingListing) {
+            // Use real Domain listing data
+            r.listingSearchUrl = matchingListing.listingUrl;
+            r.suburbPhotoUrl = matchingListing.imageUrl || getSuburbPhotoUrl(r.property.suburb);
+            console.log(`[api] Enriched ${r.property.suburb} with Domain listing: ${matchingListing.listingUrl}`);
+          } else {
+            r.suburbPhotoUrl = getSuburbPhotoUrl(r.property.suburb);
+            r.listingSearchUrl = buildListingSearchUrl(
+              r.property.suburb, r.property.state, r.property.postcode,
+              propertyType, bedrooms, budget
+            );
+          }
         }
       }
       const topReports = reports.slice(0, 5);
