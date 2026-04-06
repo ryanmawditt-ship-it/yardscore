@@ -483,30 +483,8 @@ export default function ReportPage() {
           boxShadow: "0 1px 0 rgba(0,0,0,0.05)",
         }}
       >
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: "linear-gradient(135deg, #0071e3, #34c759)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>YS</span>
-          </div>
-          <span
-            style={{
-              fontSize: 18,
-              fontWeight: 700,
-              letterSpacing: "-0.025em",
-              color: "#1d1d1f",
-            }}
-          >
-            Yardscore
-          </span>
+        <Link href="/" style={{ textDecoration: "none" }}>
+          <img src="/logo.svg" alt="Yardscore" style={{ height: 32, width: "auto" }} />
         </Link>
 
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -586,19 +564,7 @@ export default function ReportPage() {
                 marginBottom: 18,
               }}
             >
-              <div
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 7,
-                  background: "linear-gradient(135deg, #0071e3, #34c759)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <span style={{ color: "#fff", fontSize: 10, fontWeight: 800 }}>YS</span>
-              </div>
+              <img src="/favicon.svg" alt="" style={{ width: 22, height: 22 }} />
               <span
                 style={{
                   fontSize: 12,
@@ -1333,24 +1299,7 @@ export default function ReportPage() {
             gap: 12,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 6,
-                background: "linear-gradient(135deg, #0071e3, #34c759)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <span style={{ color: "#fff", fontSize: 9, fontWeight: 800 }}>YS</span>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#86868b", letterSpacing: "-0.01em" }}>
-              Yardscore
-            </span>
-          </div>
+          <img src="/logo.svg" alt="Yardscore" style={{ height: 22, width: "auto", opacity: 0.5 }} />
           <p style={{ fontSize: 12, color: "#86868b", margin: 0 }}>
             This report is for research purposes only and does not constitute financial
             advice.

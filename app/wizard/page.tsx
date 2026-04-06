@@ -404,24 +404,7 @@ export default function WizardPage() {
             justifyContent: "space-between",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                background: "linear-gradient(135deg, #0071e3, #34c759)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>YS</span>
-            </div>
-            <span style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.025em", color: "#1d1d1f" }}>
-              Yardscore
-            </span>
-          </div>
+          <img src="/logo.svg" alt="Yardscore" style={{ height: 32, width: "auto" }} />
           <span style={{ fontSize: 13, color: "#86868b" }}>Order summary</span>
         </header>
 
@@ -687,29 +670,7 @@ export default function WizardPage() {
             textDecoration: "none",
           }}
         >
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: "linear-gradient(135deg, #0071e3, #34c759)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <span style={{ color: "#fff", fontSize: 12, fontWeight: 800 }}>YS</span>
-          </div>
-          <span
-            style={{
-              fontSize: 18,
-              fontWeight: 700,
-              letterSpacing: "-0.025em",
-              color: "#1d1d1f",
-            }}
-          >
-            Yardscore
-          </span>
+          <img src="/logo.svg" alt="Yardscore" style={{ height: 32, width: "auto" }} />
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span

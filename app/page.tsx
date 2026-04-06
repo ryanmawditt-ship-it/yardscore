@@ -261,35 +261,11 @@ export default function Home() {
             justifyContent: "space-between",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: 9,
-                background: "linear-gradient(135deg, #0071e3 0%, #34c759 100%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 2px 8px rgba(0,113,227,0.35)",
-              }}
-            >
-              <span style={{ color: "#fff", fontSize: 13, fontWeight: 800, letterSpacing: "-0.02em" }}>
-                IQ
-              </span>
-            </div>
-            <span
-              style={{
-                fontSize: 19,
-                fontWeight: 700,
-                letterSpacing: "-0.025em",
-                color: scrolled ? "#1d1d1f" : "#fff",
-                transition: "color 0.35s",
-              }}
-            >
-              Yardscore
-            </span>
-          </div>
+          <img
+            src={scrolled ? "/logo.svg" : "/logo-white.svg"}
+            alt="Yardscore"
+            style={{ height: 32, width: "auto", transition: "opacity 0.35s" }}
+          />
           <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
             <span
               className="nav-tagline"
@@ -829,21 +805,7 @@ export default function Home() {
                       marginBottom: 10,
                     }}
                   >
-                    <div
-                      style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: 7,
-                        background: "linear-gradient(135deg, #0071e3, #34c759)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <span style={{ color: "#fff", fontSize: 10, fontWeight: 800 }}>
-                        IQ
-                      </span>
-                    </div>
+                    <img src="/favicon.svg" alt="" style={{ width: 22, height: 22 }} />
                     <span
                       style={{
                         fontSize: 13,
@@ -1245,21 +1207,7 @@ export default function Home() {
                     marginBottom: 6,
                   }}
                 >
-                  <div
-                    style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 6,
-                      background: "linear-gradient(135deg, #0071e3, #34c759)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <span style={{ color: "#fff", fontSize: 9, fontWeight: 800 }}>
-                      IQ
-                    </span>
-                  </div>
+                  <img src="/favicon.svg" alt="" style={{ width: 20, height: 20 }} />
                   <span
                     style={{
                       fontSize: 16,
@@ -1893,29 +1841,7 @@ export default function Home() {
               marginBottom: 14,
             }}
           >
-            <div
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 8,
-                background: "linear-gradient(135deg, #0071e3 0%, #34c759 100%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <span style={{ color: "#fff", fontSize: 11, fontWeight: 800 }}>YS</span>
-            </div>
-            <span
-              style={{
-                fontSize: 18,
-                fontWeight: 700,
-                color: "rgba(255,255,255,0.85)",
-                letterSpacing: "-0.025em",
-              }}
-            >
-              Yardscore
-            </span>
+            <img src="/logo-white.svg" alt="Yardscore" style={{ height: 26, width: "auto" }} />
           </div>
           <p
             style={{

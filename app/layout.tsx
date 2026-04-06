@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Yardscore — AI-Powered Property Analysis",
+  title: "Yardscore — AI Property Investment Research",
   description: "Find your next investment property in 10 minutes. AI analyses Australian properties against 20+ data points and delivers a ranked report.",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
