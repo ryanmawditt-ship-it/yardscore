@@ -99,6 +99,11 @@ export interface MultiPropertyReport {
   suburbReasoning: string;
   properties: FinalReport[];
   generatedAt: string;
+  pipelineSummary?: {
+    candidatesFound: number;
+    candidatesPassed: number;
+    eliminated: { address: string; reason: string }[];
+  };
 }
 
 // Legacy types retained for backwards compatibility

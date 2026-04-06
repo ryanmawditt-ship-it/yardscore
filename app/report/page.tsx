@@ -641,10 +641,33 @@ export default function ReportPage() {
             <p style={{ fontSize: 16, color: "#444", lineHeight: 1.7, margin: 0, ...sf }}>
               <span dangerouslySetInnerHTML={{ __html: multiReport.suburbReasoning.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
             </p>
-            {(multiReport.properties?.length ?? 0) > 1 && (
-              <p style={{ fontSize: 14, color: "#86868b", marginTop: 16, marginBottom: 0, ...sf }}>
-                {multiReport.properties.length} properties analysed and ranked by investment score
-              </p>
+            {multiReport.pipelineSummary && (
+              <div style={{ marginTop: 20, padding: "16px 20px", backgroundColor: "#f8fafc", borderRadius: 12, ...sf }}>
+                <p style={{ fontSize: 13, fontWeight: 600, color: "#1d1d1f", marginBottom: 8 }}>
+                  Screening summary: {multiReport.pipelineSummary.candidatesFound} candidates found, {multiReport.pipelineSummary.candidatesPassed} passed quality checks
+                </p>
+                {(multiReport.pipelineSummary.eliminated?.length ?? 0) > 0 && (
+                  <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>
+                    {(() => {
+                      const elim = multiReport.pipelineSummary.eliminated ?? [];
+                      const reasons: Record<string, number> = {};
+                      elim.forEach((e) => {
+                        const key = e.reason.includes("budget") || e.reason.includes("exceeds") ? "Price exceeded budget"
+                          : e.reason.includes("yield") ? "Could not achieve yield target"
+                          : e.reason.includes("flood") ? "High flood risk"
+                          : e.reason.includes("bushfire") ? "High bushfire risk"
+                          : e.reason.includes("bedroom") ? "Insufficient bedrooms"
+                          : e.reason.includes("zoning") ? "Non-residential zoning"
+                          : e.reason;
+                        reasons[key] = (reasons[key] ?? 0) + 1;
+                      });
+                      return Object.entries(reasons).map(([reason, count]) => (
+                        <span key={reason} style={{ display: "block" }}>{count} eliminated: {reason}</span>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}

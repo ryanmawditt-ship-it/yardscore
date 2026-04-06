@@ -193,8 +193,8 @@ export async function POST(request: NextRequest) {
           const knownBeds = meta?.bedrooms ?? null;
 
           const result = await runHardFilters(
-            prop.address, prop.lat, prop.lng, prop.state,
-            knownPrice, knownBeds, budget, bedrooms
+            prop.address, prop.lat, prop.lng, prop.suburb, prop.state,
+            knownPrice, knownBeds, budget, bedrooms, yieldTarget, propertyType
           );
           return { property: prop, filterResult: result };
         })
@@ -293,6 +293,11 @@ export async function POST(request: NextRequest) {
         suburbReasoning: selection.reasoning,
         properties: topReports,
         generatedAt: new Date().toISOString(),
+        pipelineSummary: {
+          candidatesFound: allAddresses.length,
+          candidatesPassed: candidates.length,
+          eliminated,
+        },
       };
 
       return NextResponse.json(response);
