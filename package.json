@@ -1,0 +1,35 @@
+{
+  "name": "yardscore",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test:api": "npx tsx tests/analyse.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
+    "@tailwindcss/postcss": "^4.2.2",
+    "axios": "^1.7.0",
+    "cheerio": "^1.0.0",
+    "next": "14.2.5",
+    "playwright": "^1.46.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer": "^22.15.0",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}
