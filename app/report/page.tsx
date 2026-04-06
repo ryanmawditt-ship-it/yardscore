@@ -659,6 +659,14 @@ export default function ReportPage() {
             boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
           }}
         >
+          {/* Suburb photo */}
+          {report.suburbPhotoUrl && (
+            <img
+              src={report.suburbPhotoUrl}
+              alt={property.suburb}
+              style={{ width: "100%", height: 200, objectFit: "cover", display: "block" }}
+            />
+          )}
           {/* Dark header band */}
           <div
             style={{
@@ -1397,6 +1405,36 @@ export default function ReportPage() {
             New report →
           </Link>
         </div>
+
+        {/* Listing search link */}
+        {report.listingSearchUrl && (
+          <div style={{ marginBottom: 16 }}>
+            <a
+              href={report.listingSearchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "block",
+                textAlign: "center",
+                padding: "14px",
+                backgroundColor: "#0071e3",
+                color: "#fff",
+                borderRadius: 12,
+                fontFamily: "system-ui",
+                fontSize: 15,
+                fontWeight: 600,
+                textDecoration: "none",
+                letterSpacing: "-0.01em",
+              }}
+            >
+              View current listings in {property.suburb} on realestate.com.au →
+            </a>
+            <p style={{ fontSize: 12, color: "#86868b", textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+              Links open realestate.com.au filtered to your criteria.
+              Yardscore analyses suburb fundamentals — verify specific listing details independently.
+            </p>
+          </div>
+        )}
 
         {/* Report footer */}
         <div

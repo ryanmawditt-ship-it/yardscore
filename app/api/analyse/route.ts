@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 import { geocodeAddress } from "@/lib/geocode";
 import { selectBestSuburbs } from "@/agents/suburb-selector";
-import { discoverProperties } from "@/agents/discovery";
+import { discoverProperties, getSuburbPhotoUrl, buildListingSearchUrl } from "@/agents/discovery";
 import { analyseProperty } from "@/agents/step4-property";
 import { analyseRisk } from "@/agents/step5-risk";
 import { analyseInfrastructure } from "@/agents/step6-infrastructure";
@@ -274,8 +274,17 @@ export async function POST(request: NextRequest) {
 
       console.log(`[api] Step 3 completed in ${Date.now() - startTime}ms — ${reports.length} successful reports`);
 
-      // Step 4: Sort by score descending, take top 5
+      // Step 4: Sort by score descending, attach listing URLs and photos, take top 5
       reports.sort((a, b) => b.overallScore - a.overallScore);
+      for (const r of reports) {
+        if (r.property) {
+          r.suburbPhotoUrl = getSuburbPhotoUrl(r.property.suburb);
+          r.listingSearchUrl = buildListingSearchUrl(
+            r.property.suburb, r.property.state, r.property.postcode,
+            propertyType, bedrooms, budget
+          );
+        }
+      }
       const topReports = reports.slice(0, 5);
 
       console.log(`[api] Pipeline completed in ${Date.now() - startTime}ms`);

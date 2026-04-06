@@ -81,6 +81,8 @@ export interface FinalReport {
   overallScore: number;
   executiveSummary: string;
   generatedAt: string;
+  listingSearchUrl?: string;
+  suburbPhotoUrl?: string;
 }
 
 export interface MultiPropertyReport {
