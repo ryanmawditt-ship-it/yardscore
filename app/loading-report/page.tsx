@@ -71,21 +71,25 @@ export default function LoadingReportPage() {
     hasFetched.current = true;
 
     const raw = typeof window !== "undefined" ? localStorage.getItem("ys_wizard") : null;
-    let suburb = "New Farm, QLD";
+    let searchAddress = "14 Langshaw Street, New Farm QLD 4005";
     if (raw) {
       try {
         const answers = JSON.parse(raw);
         if (answers.location?.trim()) {
           const state = answers.targetState || "QLD";
-          suburb = answers.location.split(",")[0].trim() + ", " + state;
+          const firstSuburb = answers.location.split(",")[0].trim();
+          // Build a full address string that Google Maps can geocode
+          searchAddress = `${firstSuburb}, ${state}, Australia`;
         }
       } catch { /* ignore */ }
     }
 
+    console.log("[loading-report] Sending address to analyse:", searchAddress);
+
     fetch("/api/analyse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: suburb }),
+      body: JSON.stringify({ address: searchAddress }),
     })
       .then((r) => r.json())
       .then((report) => {
