@@ -217,9 +217,10 @@ async function askClaudeWithTimeout(system: string, user: string, timeoutMs: num
   ])
 }
 
-const BATCH_SIZE = 10
-const MAX_ARTICLES = 50
-const BATCH_TIMEOUT_MS = 30_000
+const BATCH_SIZE = 5
+const MAX_ARTICLES = 30
+const BATCH_TIMEOUT_MS = 45_000
+const BATCH_DELAY_MS = 2_000
 
 async function extractIntelligence(items: FeedItem[]): Promise<Array<{
   title: string
@@ -282,6 +283,11 @@ Only include insights relevant to Australian property investment. Skip generic o
       }
     } catch (e) {
       console.error(`[research] Batch ${batchNum} failed:`, e instanceof Error ? e.message : String(e))
+    }
+
+    // Delay between batches to avoid rate limits
+    if (i + BATCH_SIZE < prioritised.length) {
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
     }
   }
 

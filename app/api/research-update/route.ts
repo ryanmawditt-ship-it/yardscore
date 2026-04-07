@@ -31,6 +31,14 @@ export async function POST(request: NextRequest) {
     })
     console.log(`[api/research-update] Cached ${result.insights.length} insights for agent use`)
 
+    // Save run stats to KV
+    await KnowledgeStore.saveLastRunStats({
+      articlesFound: result.articlesFound,
+      insightsExtracted: result.insights.length,
+      feedsScanned: result.feedsScanned,
+      runAt: result.completedAt,
+    })
+
     return NextResponse.json({
       success: true,
       summary: {
@@ -67,12 +75,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [stats, latestInsights, urgentInsights, sentiment, infraAlerts] = await Promise.all([
+    const [stats, latestInsights, urgentInsights, sentiment, infraAlerts, lastRun, runHistory, connected] = await Promise.all([
       KnowledgeStore.getStats(),
       KnowledgeStore.getLatestInsights(50),
       KnowledgeStore.getUrgentInsights(),
       KnowledgeStore.getLatestSentiment(),
       KnowledgeStore.getInfrastructureAlerts(),
+      KnowledgeStore.getLastRunStats(),
+      KnowledgeStore.getRunHistory(7),
+      KnowledgeStore.testConnection(),
     ])
 
     return NextResponse.json({
@@ -81,6 +92,9 @@ export async function GET(request: NextRequest) {
       urgentInsights,
       sentiment,
       infraAlerts,
+      lastRun,
+      runHistory,
+      connected,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

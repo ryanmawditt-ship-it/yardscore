@@ -254,4 +254,55 @@ export const KnowledgeStore = {
       return { totalInsights: 0, urgentInsights: 0, infraAlerts: 0, sentimentHistory: 0, kvConfigured: false }
     }
   },
+
+  // ─────────────────────────────────────────────────────────
+  // RUN HISTORY
+  // ─────────────────────────────────────────────────────────
+
+  async saveLastRunStats(stats: {
+    articlesFound: number
+    insightsExtracted: number
+    feedsScanned: number
+    runAt: string
+  }): Promise<void> {
+    if (!isKvConfigured()) return
+    try {
+      await kv.set('research:lastRun', JSON.stringify(stats))
+      await kv.lpush('research:runHistory', JSON.stringify(stats))
+      await kv.ltrim('research:runHistory', 0, 29) // keep 30 runs
+    } catch (e) {
+      console.error('[knowledge-store] saveLastRunStats failed:', e instanceof Error ? e.message : String(e))
+    }
+  },
+
+  async getLastRunStats(): Promise<Record<string, unknown> | null> {
+    if (!isKvConfigured()) return null
+    try {
+      const data = await kv.get('research:lastRun')
+      if (!data) return null
+      return typeof data === 'string' ? JSON.parse(data) : data as Record<string, unknown>
+    } catch { return null }
+  },
+
+  async getRunHistory(limit: number = 7): Promise<Record<string, unknown>[]> {
+    if (!isKvConfigured()) return []
+    try {
+      const items = await kv.lrange('research:runHistory', 0, limit - 1) as string[]
+      if (!items || items.length === 0) return []
+      return items.map(item => typeof item === 'string' ? JSON.parse(item) : item) as Record<string, unknown>[]
+    } catch { return [] }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  // CONNECTION TEST
+  // ─────────────────────────────────────────────────────────
+
+  async testConnection(): Promise<boolean> {
+    if (!isKvConfigured()) return false
+    try {
+      await kv.set('test:connection', 'ok', { ex: 60 })
+      const result = await kv.get('test:connection')
+      return result === 'ok'
+    } catch { return false }
+  },
 }

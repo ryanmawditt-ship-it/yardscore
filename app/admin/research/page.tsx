@@ -41,6 +41,13 @@ interface KVStats {
   kvConfigured: boolean
 }
 
+interface RunStats {
+  articlesFound: number
+  insightsExtracted: number
+  feedsScanned: number
+  runAt: string
+}
+
 interface ResearchData {
   summary: {
     feedsScanned: number
@@ -66,6 +73,9 @@ interface StoredData {
   urgentInsights: Insight[]
   sentiment: Sentiment | null
   infraAlerts: Array<{ project?: string; location?: string; impact?: string; urgency?: string }>
+  lastRun: RunStats | null
+  runHistory: RunStats[]
+  connected: boolean
 }
 
 function UrgencyBadge({ urgency }: { urgency: string }) {
@@ -123,6 +133,15 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
   )
 }
 
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const hours = Math.floor(diff / (1000 * 60 * 60))
+  const mins = Math.floor(diff / (1000 * 60))
+  if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h ago`
+  if (hours > 0) return `${hours}h ${mins % 60}m ago`
+  return `${mins}m ago`
+}
+
 export default function ResearchDashboard() {
   const [data, setData] = useState<ResearchData | null>(null)
   const [stored, setStored] = useState<StoredData | null>(null)
@@ -131,6 +150,7 @@ export default function ResearchDashboard() {
   const [error, setError] = useState<string | null>(null)
   const [adminKey, setAdminKey] = useState('')
   const [authenticated, setAuthenticated] = useState(false)
+  const [progressMsg, setProgressMsg] = useState('')
 
   const loadStoredData = useCallback(async () => {
     setLoadingStored(true)
@@ -144,7 +164,7 @@ export default function ResearchDashboard() {
         setStored(json)
       }
     } catch {
-      // Silently fail — stored data is supplementary
+      // Silently fail
     } finally {
       setLoadingStored(false)
     }
@@ -153,7 +173,10 @@ export default function ResearchDashboard() {
   const runResearch = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setProgressMsg('Research starting...')
     try {
+      setProgressMsg('Scanning 45 RSS feeds...')
+
       const res = await fetch('/api/research-update', {
         method: 'POST',
         headers: {
@@ -161,16 +184,22 @@ export default function ResearchDashboard() {
           'Content-Type': 'application/json',
         },
       })
+
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error || `HTTP ${res.status}`)
       }
+
+      setProgressMsg('Processing results...')
       const json = await res.json()
       setData(json)
-      // Refresh stored data after a run
+      setProgressMsg(`Done! ${json.summary.insightsExtracted} insights from ${json.summary.articlesFound} articles`)
       loadStoredData()
+
+      setTimeout(() => setProgressMsg(''), 5000)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      setProgressMsg('')
     } finally {
       setLoading(false)
     }
@@ -184,7 +213,6 @@ export default function ResearchDashboard() {
     }
   }, [])
 
-  // Load stored data on authentication
   useEffect(() => {
     if (authenticated && adminKey) {
       loadStoredData()
@@ -221,13 +249,15 @@ export default function ResearchDashboard() {
     )
   }
 
-  // Determine which sentiment to show — latest run or stored
   const activeSentiment = data?.sentiment || stored?.sentiment
   const activeInsights = data?.insights || stored?.latestInsights || []
+  const lastRun = stored?.lastRun
+  const hoursSinceLastRun = lastRun?.runAt
+    ? (Date.now() - new Date(lastRun.runAt).getTime()) / (1000 * 60 * 60)
+    : null
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div>
@@ -247,7 +277,7 @@ export default function ResearchDashboard() {
               disabled={loadingStored}
               className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 disabled:opacity-50 transition"
             >
-              {loadingStored ? 'Loading...' : 'Refresh Stored Data'}
+              Refresh
             </button>
             <button
               onClick={() => { localStorage.removeItem('yardscore-admin-key'); setAuthenticated(false) }}
@@ -266,18 +296,58 @@ export default function ResearchDashboard() {
           </div>
         )}
 
-        {loading && !data && (
-          <div className="text-center py-20">
-            <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <p className="mt-4 text-gray-500">Running full research cycle... This may take a few minutes.</p>
+        {progressMsg && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-blue-700 text-sm flex items-center gap-3">
+            {loading && <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />}
+            {progressMsg}
           </div>
         )}
 
-        {/* Stored Intelligence Summary — always shown if KV has data */}
-        {stored?.stats && (
+        {/* Stale data warning */}
+        {hoursSinceLastRun !== null && hoursSinceLastRun > 25 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm">
+            Research not updated in {Math.floor(hoursSinceLastRun)} hours — run now to get fresh intelligence.
+          </div>
+        )}
+
+        {/* Last Run + Connection Status + Schedule */}
+        {stored && (
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+              <p className="text-sm text-gray-500">Last Research Run</p>
+              {lastRun?.runAt ? (
+                <>
+                  <p className="text-lg font-bold text-gray-900 mt-1">{timeAgo(lastRun.runAt)}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {new Date(lastRun.runAt).toLocaleString()} — {lastRun.insightsExtracted} insights from {lastRun.articlesFound} articles
+                  </p>
+                </>
+              ) : (
+                <p className="text-lg font-bold text-gray-400 mt-1">Never</p>
+              )}
+            </div>
+            <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+              <p className="text-sm text-gray-500">Next Scheduled Run</p>
+              <p className="text-lg font-bold text-gray-900 mt-1">6:00 AM AEST daily</p>
+              <p className="text-xs text-gray-400 mt-1">Vercel Cron: 0 6 * * *</p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+              <p className="text-sm text-gray-500">Upstash Redis</p>
+              <p className={`text-lg font-bold mt-1 ${stored.connected ? 'text-green-600' : 'text-red-600'}`}>
+                {stored.connected ? 'Connected' : 'Disconnected'}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                {stored.stats?.totalInsights ?? 0} insights stored
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Stored Intelligence Summary */}
+        {stored?.stats && stored.stats.totalInsights > 0 && (
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-3">Stored Intelligence (Persistent Database)</h2>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <h2 className="text-lg font-bold text-gray-900 mb-3">Persistent Knowledge Store</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <div>
                 <p className="text-xs text-gray-500">Total Insights</p>
                 <p className="text-xl font-bold text-blue-700">{stored.stats.totalInsights}</p>
@@ -294,15 +364,8 @@ export default function ResearchDashboard() {
                 <p className="text-xs text-gray-500">Sentiment History</p>
                 <p className="text-xl font-bold text-green-600">{stored.stats.sentimentHistory}</p>
               </div>
-              <div>
-                <p className="text-xs text-gray-500">KV Status</p>
-                <p className={`text-xl font-bold ${stored.stats.kvConfigured ? 'text-green-600' : 'text-red-600'}`}>
-                  {stored.stats.kvConfigured ? 'Connected' : 'Not configured'}
-                </p>
-              </div>
             </div>
 
-            {/* Urgent insights from store */}
             {stored.urgentInsights && stored.urgentInsights.length > 0 && (
               <div className="mt-4">
                 <p className="text-sm font-medium text-gray-700 mb-2">Urgent Signals</p>
@@ -320,7 +383,6 @@ export default function ResearchDashboard() {
               </div>
             )}
 
-            {/* Infrastructure alerts from store */}
             {stored.infraAlerts && stored.infraAlerts.length > 0 && (
               <div className="mt-4">
                 <p className="text-sm font-medium text-gray-700 mb-2">Infrastructure Alerts</p>
@@ -338,33 +400,52 @@ export default function ResearchDashboard() {
           </div>
         )}
 
-        {!data && !loading && !stored?.stats?.totalInsights && (
-          <div className="text-center py-20">
-            <p className="text-gray-400 text-lg">Click &quot;Run Research Now&quot; to start scanning sources.</p>
+        {/* Run History */}
+        {stored?.runHistory && stored.runHistory.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-3">Run History</h2>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 border-b">
+                  <th className="pb-2 font-medium">When</th>
+                  <th className="pb-2 font-medium">Feeds</th>
+                  <th className="pb-2 font-medium">Articles</th>
+                  <th className="pb-2 font-medium">Insights</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stored.runHistory.map((run, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="py-2 text-gray-900">{run.runAt ? new Date(run.runAt).toLocaleString() : '—'}</td>
+                    <td className="py-2 text-gray-600">{run.feedsScanned ?? '—'}</td>
+                    <td className="py-2 text-gray-600">{run.articlesFound ?? '—'}</td>
+                    <td className="py-2 font-semibold text-gray-900">{run.insightsExtracted ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 
         {/* Latest Run Stats */}
         {data && (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
-              <StatCard label="Sources Monitored" value={data.summary.sourcesMonitored} />
-              <StatCard label="Feeds Scanned" value={`${data.summary.feedsSuccessful}/${data.summary.feedsScanned}`} />
-              <StatCard label="Articles Found" value={data.summary.articlesFound} />
-              <StatCard label="Insights Extracted" value={data.summary.insightsExtracted} />
-              <StatCard label="Council DAs" value={data.summary.councilDAsScanned} />
-              <StatCard
-                label="KV Store"
-                value={data.kvStats?.totalInsights ?? 0}
-                sub={data.kvStats?.kvConfigured ? 'connected' : 'not configured'}
-              />
-              <StatCard
-                label="Last Updated"
-                value={new Date(data.summary.completedAt).toLocaleTimeString()}
-                sub={`${(data.summary.durationMs / 1000).toFixed(1)}s`}
-              />
-            </div>
-          </>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4">
+            <StatCard label="Sources Monitored" value={data.summary.sourcesMonitored} />
+            <StatCard label="Feeds Scanned" value={`${data.summary.feedsSuccessful}/${data.summary.feedsScanned}`} />
+            <StatCard label="Articles Found" value={data.summary.articlesFound} />
+            <StatCard label="Insights Extracted" value={data.summary.insightsExtracted} />
+            <StatCard label="Council DAs" value={data.summary.councilDAsScanned} />
+            <StatCard
+              label="KV Store"
+              value={data.kvStats?.totalInsights ?? 0}
+              sub={data.kvStats?.kvConfigured ? 'connected' : 'not configured'}
+            />
+            <StatCard
+              label="Duration"
+              value={`${(data.summary.durationMs / 1000).toFixed(1)}s`}
+              sub={new Date(data.summary.completedAt).toLocaleTimeString()}
+            />
+          </div>
         )}
 
         {/* Sentiment Panel */}
@@ -440,12 +521,8 @@ export default function ResearchDashboard() {
                         <UrgencyBadge urgency={insight.urgency} />
                         <ImpactBadge impact={insight.impact} />
                         <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{insight.category}</span>
-                        {insight.state && (
-                          <span className="text-xs text-blue-600 font-medium">{insight.state}</span>
-                        )}
-                        {insight.suburb && (
-                          <span className="text-xs text-purple-600 font-medium">{insight.suburb}</span>
-                        )}
+                        {insight.state && <span className="text-xs text-blue-600 font-medium">{insight.state}</span>}
+                        {insight.suburb && <span className="text-xs text-purple-600 font-medium">{insight.suburb}</span>}
                       </div>
                       <p className="text-sm font-semibold text-gray-900">{insight.title}</p>
                       <p className="text-sm text-gray-600 mt-1">{insight.summary}</p>
@@ -486,6 +563,12 @@ export default function ResearchDashboard() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {!data && !loading && !stored?.stats?.totalInsights && (
+          <div className="text-center py-20">
+            <p className="text-gray-400 text-lg">Click &quot;Run Research Now&quot; to start scanning sources.</p>
           </div>
         )}
       </main>
