@@ -112,3 +112,7 @@ export async function geocodeAddress(address: string): Promise<GeocodedProperty>
     postcode,
   };
 }
+
+export function getPostcodeForSuburb(suburb: string): string | null {
+  return SUBURB_POSTCODES[suburb.toLowerCase().trim()] ?? null;
+}

@@ -1,7 +1,9 @@
 import { askClaude } from "@/lib/claude";
 import { searchListings, type DomainListing } from "@/lib/domain-api";
 import { getRealListings, type HomelyListing } from "@/scrapers/homely";
+import { scrapeAllHomesListings } from "@/scrapers/allhomes";
 import { findSuburbPick } from "@/lib/investment-intelligence";
+import { getPostcodeForSuburb } from "@/lib/geocode";
 
 // ── Photo mapping ──
 
@@ -62,7 +64,7 @@ export interface ListingMeta {
   priceDisplay: string;
   bedrooms: number | null;
   bathrooms: number | null;
-  source: "homely" | "view" | "domain" | "ai-generated" | "fallback";
+  source: "allhomes" | "homely" | "view" | "domain" | "ai-generated" | "fallback";
 }
 
 const listingMetaCache = new Map<string, ListingMeta>();
@@ -125,10 +127,30 @@ export async function discoverProperties(
   const stateName = stateMap[state] || state.toLowerCase();
   const suburbSlug = suburb.toLowerCase().replace(/\s+/g, "-");
 
-  // 1. Try Homely / View scrapers
+  // 0. Try AllHomes (PRIMARY — confirmed working with real SSR HTML)
+  const pc = postcode || getPostcodeForSuburb(suburb) || "";
+  const allhomesListings = await scrapeAllHomesListings(suburb, state, pc, maxBudget, bedrooms, propertyType);
+  if (allhomesListings.length > 0) {
+    console.log(`[discovery] Got ${allhomesListings.length} REAL AllHomes listings for ${suburb}`);
+    const selected = allhomesListings.slice(0, 3);
+    for (const l of selected) {
+      listingMetaCache.set(l.address, {
+        listingUrl: l.listingUrl,
+        photoUrl: l.photoUrl,
+        price: l.price,
+        priceDisplay: l.priceDisplay,
+        bedrooms: l.bedrooms,
+        bathrooms: l.bathrooms,
+        source: "allhomes" as const,
+      });
+    }
+    return selected.map((l) => l.address);
+  }
+
+  // 1. Try Homely / View scrapers (backup)
   const realListings = await getRealListings(suburb, state, maxBudget, bedrooms, propertyType);
   if (realListings.length > 0) {
-    console.log(`[discovery] Got ${realListings.length} REAL listings from scrapers for ${suburb}`);
+    console.log(`[discovery] Got ${realListings.length} REAL listings from Homely/View for ${suburb}`);
     const selected = realListings.slice(0, 3);
     for (const l of selected) {
       listingMetaCache.set(l.address, {

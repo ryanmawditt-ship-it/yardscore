@@ -1,28 +1,121 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import type { FinalReport, MultiPropertyReport } from "@/types";
+
+/* ── Brand ── */
+const NAVY = "#0F1F3D";
+const GOLD = "#C9A84C";
+const GREEN = "#16A34A";
+const AMBER = "#D97706";
+const RED = "#DC2626";
+const LIGHT_GREY = "#F8F9FA";
 
 const sf = {
   fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 };
 
-/* ── SVG Arc Gauge score display ── */
-function ScoreGauge({ score }: { score: number }) {
+const georgia = {
+  fontFamily: "Georgia, serif",
+};
+
+/* ── Helpers ── */
+function fmt(n: number | null | undefined, prefix = "", suffix = "", fallback = "—") {
+  if (n === null || n === undefined) return fallback;
+  return `${prefix}${n.toLocaleString()}${suffix}`;
+}
+
+function fmtCashflow(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  if (n >= 0) return "$" + Math.abs(n).toLocaleString() + " pw";
+  return "-$" + Math.abs(n).toLocaleString() + " pw";
+}
+
+function scoreColor(score: number): string {
+  if (score >= 7) return GREEN;
+  if (score >= 5) return AMBER;
+  return RED;
+}
+
+function signalConfig(signal: string) {
+  const s = (signal ?? "hold").toLowerCase();
+  if (s === "buy") return { bg: GREEN, label: "BUY SIGNAL" };
+  if (s === "avoid") return { bg: RED, label: "AVOID" };
+  return { bg: AMBER, label: "HOLD" };
+}
+
+function riskStyle(value: string) {
+  const v = (value ?? "none").toLowerCase();
+  if (v === "none" || v === "low" || v === "clear" || v === "no" || v === "false") {
+    return { bg: "#F0FDF4", border: "#BBF7D0", color: GREEN, display: v === "low" ? "Low" : "Clear" };
+  }
+  if (v === "high" || v === "yes" || v === "true") {
+    return { bg: "#FEF2F2", border: "#FECACA", color: RED, display: v === "high" ? "High" : "Listed" };
+  }
+  return { bg: "#FEFCE8", border: "#FDE68A", color: AMBER, display: v.charAt(0).toUpperCase() + v.slice(1) };
+}
+
+/* ── Logo SVG ── */
+function YardscoreLogo({ size = 28, dark = false }: { size?: number; dark?: boolean }) {
+  const circleFill = dark ? NAVY : "white";
+  const lineFill = dark ? "white" : NAVY;
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40">
+      <circle cx="20" cy="20" r="20" fill={circleFill} />
+      <line x1="11" y1="9" x2="20" y2="20" stroke={lineFill} strokeWidth="3" strokeLinecap="round" />
+      <line x1="29" y1="9" x2="20" y2="20" stroke={lineFill} strokeWidth="3" strokeLinecap="round" />
+      <line x1="20" y1="20" x2="20" y2="31" stroke={lineFill} strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ── Animated Number Counter ── */
+function AnimatedNumber({ value, prefix = "", suffix = "", duration = 1200 }: {
+  value: number;
+  prefix?: string;
+  suffix?: string;
+  duration?: number;
+}) {
+  const [display, setDisplay] = useState(0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const hasAnimated = useRef(false);
+
+  useEffect(() => {
+    if (hasAnimated.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !hasAnimated.current) {
+          hasAnimated.current = true;
+          const start = performance.now();
+          const animate = (now: number) => {
+            const elapsed = now - start;
+            const progress = Math.min(elapsed / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+            setDisplay(Math.round(value * eased));
+            if (progress < 1) requestAnimationFrame(animate);
+          };
+          requestAnimationFrame(animate);
+        }
+      },
+      { threshold: 0.3 }
+    );
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [value, duration]);
+
+  return <span ref={ref}>{prefix}{display.toLocaleString()}{suffix}</span>;
+}
+
+/* ── Score Gauge ── */
+function ScoreGauge({ score, size = 100 }: { score: number; size?: number }) {
   const [animated, setAnimated] = useState(false);
-  const size = 148;
-  const strokeWidth = 10;
+  const strokeWidth = 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  // 270° arc
   const arcLength = circumference * 0.75;
   const fillLength = animated ? (score / 10) * arcLength : 0;
-
-  const color =
-    score >= 7.5 ? "#34c759" : score >= 5 ? "#ff9f0a" : "#ff3b30";
-  const bgColor =
-    score >= 7.5 ? "rgba(52,199,89,0.08)" : score >= 5 ? "rgba(255,159,10,0.08)" : "rgba(255,59,48,0.08)";
+  const color = scoreColor(score);
 
   useEffect(() => {
     const t = setTimeout(() => setAnimated(true), 200);
@@ -30,354 +123,418 @@ function ScoreGauge({ score }: { score: number }) {
   }, []);
 
   return (
-    <div
-      style={{
-        position: "relative",
-        width: size,
-        height: size,
-        flexShrink: 0,
-        backgroundColor: bgColor,
-        borderRadius: "50%",
-      }}
-    >
-      {/* SVG arc - rotated so arc starts at bottom-left */}
-      <svg
-        width={size}
-        height={size}
-        style={{ position: "absolute", inset: 0, transform: "rotate(135deg)" }}
-      >
-        {/* Track */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="#e8e8ed"
-          strokeWidth={strokeWidth}
-          strokeDasharray={`${arcLength} ${circumference - arcLength}`}
-          strokeLinecap="round"
-        />
-        {/* Fill */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeDasharray={`${fillLength} ${circumference - fillLength}`}
-          strokeLinecap="round"
-          style={{
-            transition: "stroke-dasharray 1.2s cubic-bezier(0.16,1,0.3,1)",
-            filter: `drop-shadow(0 0 6px ${color}60)`,
-          }}
-        />
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ position: "absolute", inset: 0, transform: "rotate(135deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={strokeWidth} strokeDasharray={`${arcLength} ${circumference - arcLength}`} strokeLinecap="round" />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={strokeWidth} strokeDasharray={`${fillLength} ${circumference - fillLength}`} strokeLinecap="round" style={{ transition: "stroke-dasharray 1.2s cubic-bezier(0.16,1,0.3,1)" }} />
       </svg>
-      {/* Center content */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <span
-          style={{
-            fontSize: 40,
-            fontWeight: 800,
-            color,
-            letterSpacing: "-0.045em",
-            lineHeight: 1,
-          }}
-        >
-          {score.toFixed(1)}
-        </span>
-        <span style={{ fontSize: 13, color: "#86868b", marginTop: 3, letterSpacing: "-0.01em" }}>
-          / 10
-        </span>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontSize: size * 0.38, fontWeight: 800, color, lineHeight: 1, ...sf }}>{score}</span>
+        <span style={{ fontSize: size * 0.13, color: "rgba(255,255,255,0.5)", marginTop: 2, ...sf }}>/ 10</span>
       </div>
     </div>
   );
 }
 
-/* ── Signal badge ── */
-function SignalBadge({ signal }: { signal: "buy" | "hold" | "avoid" }) {
-  const map = {
-    buy: { bg: "#d1f7dc", color: "#1a7f37", label: "Buy Signal", dot: "#34c759" },
-    hold: { bg: "#fff3cd", color: "#856404", label: "Hold", dot: "#f59e0b" },
-    avoid: { bg: "#fde8e8", color: "#c0392b", label: "Avoid", dot: "#ff3b30" },
-  };
-  const s = map[signal] ?? map.hold;
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 7,
-        backgroundColor: s.bg,
-        color: s.color,
-        fontSize: 14,
-        fontWeight: 700,
-        padding: "8px 18px",
-        borderRadius: 980,
-        letterSpacing: "0.01em",
-      }}
-    >
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: "50%",
-          backgroundColor: s.dot,
-          display: "inline-block",
-        }}
-      />
-      {s.label}
-    </span>
-  );
-}
+/* ── Comparison Chart (SVG bar chart) ── */
+function ComparisonChart({ reports }: { reports: FinalReport[] }) {
+  if (reports.length === 0) return null;
 
-/* ── Risk pill ── */
-function RiskPill({
-  severity,
-  label,
-}: {
-  severity: "green" | "amber" | "red";
-  label: string;
-}) {
-  const map = {
-    green: { bg: "#d1f7dc", color: "#1a7f37", icon: "✓" },
-    amber: { bg: "#fff3cd", color: "#856404", icon: "⚠" },
-    red: { bg: "#fde8e8", color: "#c0392b", icon: "✕" },
-  };
-  const s = map[severity];
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        backgroundColor: s.bg,
-        color: s.color,
-        fontSize: 13,
-        fontWeight: 600,
-        padding: "6px 14px",
-        borderRadius: 980,
-        letterSpacing: "-0.01em",
-      }}
-    >
-      <span style={{ fontSize: 11 }}>{s.icon}</span>
-      {label}
-    </span>
-  );
-}
+  const metrics = [
+    { key: "overallScore", label: "Overall Score", max: 10, format: (v: number) => `${v}/10` },
+    { key: "grossYield", label: "Gross Yield %", max: 10, format: (v: number) => `${v.toFixed(1)}%` },
+    { key: "infraScore", label: "Infrastructure", max: 10, format: (v: number) => `${v}/10` },
+  ];
 
-/* ── Metric row ── */
-function MetricRow({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
+  const colors = [GOLD, GREEN, "#2563EB"];
+  const barHeight = 18;
+  const barGap = 6;
+  const groupGap = 24;
+  const labelWidth = 110;
+  const chartWidth = 700;
+  const barAreaWidth = chartWidth - labelWidth - 80;
+
+  const totalHeight = metrics.length * (reports.length * (barHeight + barGap) + groupGap) + 50;
+
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "16px 0",
-        borderBottom: "0.5px solid #e8e8ed",
-      }}
-    >
-      <span style={{ fontSize: 15, color: "#86868b", letterSpacing: "-0.01em" }}>
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 15,
-          color: accent ? "#0071e3" : "#1d1d1f",
-          fontWeight: 600,
-          letterSpacing: "-0.01em",
-        }}
-      >
-        {value}
-      </span>
+    <div style={{ backgroundColor: LIGHT_GREY, borderRadius: 12, padding: "24px 28px", border: "1px solid #E5E7EB", marginBottom: 28 }}>
+      <div style={{ ...sf, fontSize: 11, fontWeight: 700, color: NAVY, letterSpacing: "0.08em", marginBottom: 16 }}>
+        PROPERTY COMPARISON
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 20, marginBottom: 16 }}>
+        {reports.slice(0, 3).map((r, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: colors[i] }} />
+            <span style={{ ...sf, fontSize: 12, color: "#555" }}>{r.property?.suburb ?? `Property ${i + 1}`}</span>
+          </div>
+        ))}
+      </div>
+
+      <svg width={chartWidth} height={totalHeight} viewBox={`0 0 ${chartWidth} ${totalHeight}`}>
+        {metrics.map((metric, mi) => {
+          const groupY = mi * (reports.length * (barHeight + barGap) + groupGap);
+          return (
+            <g key={metric.key}>
+              <text x="0" y={groupY + 12} fontFamily="system-ui,-apple-system,sans-serif" fontSize="11" fontWeight="600" fill="#666" letterSpacing="0.05em">
+                {metric.label.toUpperCase()}
+              </text>
+              {reports.map((r, ri) => {
+                let val = 0;
+                if (metric.key === "overallScore") val = r.overallScore ?? 0;
+                else if (metric.key === "grossYield") val = r.yield?.grossYieldPct ?? 0;
+                else if (metric.key === "infraScore") val = r.infrastructure?.infrastructureScore ?? 0;
+
+                const barW = Math.max(6, (val / metric.max) * barAreaWidth);
+                const barY = groupY + 20 + ri * (barHeight + barGap);
+                const suburb = r.property?.suburb?.substring(0, 14) ?? "";
+
+                return (
+                  <g key={ri}>
+                    <text x={labelWidth - 8} y={barY + 13} fontFamily="system-ui,-apple-system,sans-serif" fontSize="10" fill="#888" textAnchor="end">
+                      {suburb}
+                    </text>
+                    <rect x={labelWidth} y={barY} width={barW} height={barHeight} rx="4" fill={colors[ri % colors.length]} opacity="0.85" />
+                    <text x={labelWidth + barW + 8} y={barY + 13} fontFamily="system-ui,-apple-system,sans-serif" fontSize="11" fontWeight="700" fill="#333">
+                      {metric.format(val)}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
 
-/* ── Premium section card ── */
-function Section({
-  title,
-  badge,
-  children,
-}: {
-  title: string;
-  badge?: { label: string; color: string; bg: string };
-  children: React.ReactNode;
-}) {
+/* ── Key Highlights Strip ── */
+function HighlightsStrip({ report }: { report: FinalReport }) {
+  const v = report.valuation;
+  const y = report.yield;
+  const infra = report.infrastructure;
+
+  const highlights = [
+    { label: "FAIR VALUE", value: fmt(v?.fairValueMid, "$"), color: NAVY },
+    { label: "GROSS YIELD", value: y?.grossYieldPct != null ? y.grossYieldPct.toFixed(1) + "%" : "—", color: (y?.grossYieldPct ?? 0) >= 5 ? GREEN : NAVY },
+    { label: "CASHFLOW", value: fmtCashflow(y?.cashflowWeekly), color: (y?.cashflowWeekly ?? 0) >= 0 ? GREEN : RED },
+    { label: "INFRA SCORE", value: `${infra?.infrastructureScore ?? 0}/10`, color: (infra?.infrastructureScore ?? 0) >= 7 ? GREEN : NAVY },
+  ];
+
   return (
-    <div
-      style={{
-        border: "0.5px solid #e8e8ed",
-        borderRadius: 20,
-        padding: "32px",
-        marginBottom: 16,
-        backgroundColor: "#fff",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 24,
-          flexWrap: "wrap",
-          gap: 10,
-        }}
-      >
-        <h2
-          style={{
-            fontSize: 20,
-            fontWeight: 700,
-            color: "#1d1d1f",
-            letterSpacing: "-0.025em",
-            margin: 0,
-          }}
-        >
-          {title}
-        </h2>
-        {badge && (
-          <span
-            style={{
-              display: "inline-block",
-              backgroundColor: badge.bg,
-              color: badge.color,
-              fontSize: 12,
-              fontWeight: 600,
-              padding: "5px 12px",
-              borderRadius: 980,
-            }}
-          >
-            {badge.label}
+    <div style={{ display: "flex", backgroundColor: "#FAFBFC", borderBottom: "1px solid #E5E7EB" }}>
+      {highlights.map((h, i) => (
+        <div key={h.label} style={{ flex: 1, textAlign: "center", padding: "16px 12px", borderLeft: i > 0 ? "1px solid #E5E7EB" : "none" }}>
+          <div style={{ ...sf, fontSize: 10, letterSpacing: "0.1em", color: "#999", marginBottom: 4 }}>{h.label}</div>
+          <div style={{ ...sf, fontSize: 18, fontWeight: 800, color: h.color }}>{h.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── Property Card Component ── */
+function PropertyCard({ report, index, total }: { report: FinalReport; index: number; total: number }) {
+  const p = report.property ?? { address: "", suburb: "", state: "", postcode: "", lat: 0, lng: 0 };
+  const v = report.valuation;
+  const y = report.yield;
+  const r = report.risk;
+  const a = report.analysis;
+  const infra = report.infrastructure;
+  const meta = report.pipelineMeta;
+  const sc = report.overallScore ?? 0;
+  const signal = signalConfig(String(v?.signal ?? "hold"));
+
+  const flood = riskStyle(String(r?.floodRisk ?? "none"));
+  const bushfire = riskStyle(String(r?.bushfireRisk ?? "none"));
+  const heritage = riskStyle(r?.hasHeritage ? "yes" : "no");
+  const easement = riskStyle(r?.hasEasement ? "yes" : "no");
+
+  const investmentThesis = report.executiveSummary || String(v?.investmentThesis ?? "");
+  const listingUrl = report.listingSearchUrl;
+  const listingSiteName = listingUrl?.includes("allhomes.com.au") ? "AllHomes.com.au"
+    : listingUrl?.includes("homely.com.au") ? "Homely.com.au"
+    : listingUrl?.includes("view.com.au") ? "View.com.au"
+    : listingUrl?.includes("domain.com.au") ? "Domain.com.au"
+    : "AllHomes.com.au";
+
+  return (
+    <div style={{ marginBottom: 32 }}>
+      {total > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+          <div style={{ flex: 1, height: 1, backgroundColor: GOLD, opacity: 0.4 }} />
+          <span style={{ ...sf, fontSize: 12, fontWeight: 700, color: GOLD, letterSpacing: "0.1em" }}>
+            PROPERTY {index + 1} OF {total}
           </span>
+          <div style={{ flex: 1, height: 1, backgroundColor: GOLD, opacity: 0.4 }} />
+        </div>
+      )}
+
+      <div className="property-card" style={{ backgroundColor: "white", borderRadius: 16, overflow: "hidden", border: "1px solid #E5E7EB", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", transition: "box-shadow 0.3s" }}>
+        {/* NAVY HEADER */}
+        <div style={{ backgroundColor: NAVY, color: "white", padding: "28px 32px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ ...sf, fontSize: 10, letterSpacing: "0.2em", color: GOLD, marginBottom: 10, fontWeight: 600 }}>
+                PROPERTY {index + 1} OF {total}
+              </div>
+              <h2 style={{ ...sf, fontSize: "clamp(20px, 3vw, 28px)", fontWeight: 800, lineHeight: 1.15, marginBottom: 8, color: "white" }}>
+                {p.address}
+              </h2>
+              <p style={{ ...sf, fontSize: 14, color: "rgba(255,255,255,0.6)", marginBottom: 16 }}>
+                {p.suburb} · {p.state} {p.postcode}
+              </p>
+              <span style={{ display: "inline-block", padding: "6px 18px", borderRadius: 20, backgroundColor: signal.bg, color: "white", ...sf, fontSize: 12, fontWeight: 700 }}>
+                {signal.label}
+              </span>
+            </div>
+            <div style={{ textAlign: "center", minWidth: 100 }}>
+              <div style={{ ...sf, fontSize: 10, letterSpacing: "0.12em", color: GOLD, marginBottom: 4, fontWeight: 600 }}>YARDSCORE</div>
+              <ScoreGauge score={sc} size={90} />
+            </div>
+          </div>
+        </div>
+
+        {/* SUBURB PHOTO */}
+        {report.suburbPhotoUrl && (
+          <div style={{ position: "relative", height: 220, overflow: "hidden" }}>
+            <img src={report.suburbPhotoUrl} alt={p.suburb} style={{ width: "100%", height: 220, objectFit: "cover", display: "block" }} />
+            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 60, background: "linear-gradient(transparent, rgba(0,0,0,0.55))" }} />
+            <span style={{ position: "absolute", bottom: 12, left: 20, ...sf, fontSize: 15, fontWeight: 600, color: "white" }}>
+              {p.suburb} {p.postcode}
+            </span>
+          </div>
+        )}
+
+        {/* KEY HIGHLIGHTS */}
+        <HighlightsStrip report={report} />
+
+        {/* WHY THIS PROPERTY */}
+        {meta && (
+          <div style={{ backgroundColor: "#EFF6FF", padding: "18px 32px" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              <span style={{ ...sf, fontSize: 12, backgroundColor: "#F0FDF4", color: GREEN, padding: "5px 14px", borderRadius: 20, fontWeight: 600 }}>
+                Passed {meta.checksRun?.length ?? 0} of {meta.checksRun?.length ?? 0} quality checks
+              </span>
+              <span style={{ ...sf, fontSize: 12, backgroundColor: "#EFF6FF", color: "#2563EB", padding: "5px 14px", borderRadius: 20, fontWeight: 600, border: "1px solid #BFDBFE" }}>
+                Ranked #{meta.rankPosition} of {meta.candidatesPassed} candidates
+              </span>
+              <span style={{ ...sf, fontSize: 12, backgroundColor: "#F5F3FF", color: "#7C3AED", padding: "5px 14px", borderRadius: 20, fontWeight: 600 }}>
+                Client score: {meta.clientScore}/10
+              </span>
+            </div>
+            <p style={{ ...sf, fontSize: 13, color: "#64748B", margin: 0, lineHeight: 1.6 }}>
+              Selected from {meta.candidatesFound} initial candidates across 3 suburbs
+            </p>
+          </div>
+        )}
+
+        {/* TWO COLUMN: RISK + FINANCIAL */}
+        <div className="two-col-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+          {/* LEFT: Risk */}
+          <div style={{ padding: "28px 32px", borderRight: "1px solid #F0F0F0" }}>
+            <h3 style={{ ...sf, fontSize: 11, letterSpacing: "0.12em", color: "#666", marginBottom: 16, fontWeight: 600 }}>RISK ASSESSMENT</h3>
+            <div className="risk-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+              {[
+                { label: "FLOOD RISK", data: flood },
+                { label: "BUSHFIRE RISK", data: bushfire },
+                { label: "HERITAGE", data: heritage, display: r?.hasHeritage ? "Listed" : "Clear" },
+                { label: "EASEMENT", data: easement, display: r?.hasEasement ? "Present" : "Clear" },
+              ].map((item) => (
+                <div key={item.label} style={{ backgroundColor: item.data.bg, border: `1px solid ${item.data.border}`, borderRadius: 8, padding: "12px 10px", textAlign: "center" }}>
+                  <div style={{ ...sf, fontSize: 10, color: "#666", letterSpacing: "0.1em", marginBottom: 4 }}>{item.label}</div>
+                  <div style={{ ...sf, fontSize: 15, fontWeight: 700, color: item.data.color }}>{item.display ?? item.data.display}</div>
+                </div>
+              ))}
+            </div>
+            {r?.zoningCode && (
+              <div style={{ ...sf, fontSize: 13, color: "#555", marginBottom: 6 }}>
+                <strong style={{ color: "#333" }}>Zoning:</strong> {r.zoningCode}{r.zoningDescription ? ` — ${r.zoningDescription}` : ""}
+              </div>
+            )}
+            {r?.socialHousingPct != null && (
+              <div style={{ ...sf, fontSize: 13, color: "#555", marginBottom: 6 }}>
+                <strong style={{ color: "#333" }}>Social housing:</strong> {r.socialHousingPct}%
+              </div>
+            )}
+            {r?.riskSummary && (
+              <p style={{ ...georgia, fontSize: 13, fontStyle: "italic", color: "#666", lineHeight: 1.7, marginTop: 12, marginBottom: 0 }}>
+                {r.riskSummary}
+              </p>
+            )}
+          </div>
+
+          {/* RIGHT: Financial */}
+          <div style={{ padding: "28px 32px" }}>
+            <h3 style={{ ...sf, fontSize: 11, letterSpacing: "0.12em", color: "#666", marginBottom: 16, fontWeight: 600 }}>FINANCIAL ANALYSIS</h3>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <tbody>
+                {[
+                  { label: "Fair value range", value: `${fmt(v?.fairValueLow, "$")} – ${fmt(v?.fairValueHigh, "$")}` },
+                  { label: "Fair value mid", value: fmt(v?.fairValueMid, "$"), bold: true, color: NAVY },
+                  { label: "Weekly rent est.", value: y?.estimatedWeeklyRent ? `$${y.estimatedWeeklyRent.toLocaleString()} pw` : "—" },
+                  { label: "Gross yield", value: y?.grossYieldPct != null ? y.grossYieldPct.toFixed(2) + "%" : "—", bold: true, color: (y?.grossYieldPct ?? 0) >= 5 ? GREEN : "#333" },
+                  { label: "Net yield", value: y?.netYieldPct != null ? y.netYieldPct.toFixed(2) + "%" : "—" },
+                  { label: "Weekly cashflow", value: fmtCashflow(y?.cashflowWeekly), bold: true, color: (y?.cashflowWeekly ?? 0) >= 0 ? GREEN : RED },
+                  { label: "Vacancy rate", value: y?.vacancyRatePct != null ? y.vacancyRatePct + "%" : "—" },
+                  { label: "Bedrooms", value: a?.bedrooms != null ? String(a.bedrooms) : "—" },
+                  { label: "Bathrooms", value: a?.bathrooms != null ? String(a.bathrooms) : "—" },
+                  { label: "Land size", value: a?.landSize ? a.landSize.toLocaleString() + " m²" : "—" },
+                  { label: "Year built", value: a?.yearBuilt ? String(a.yearBuilt) : "—" },
+                ].map((row, i) => (
+                  <tr key={row.label} style={{ backgroundColor: i % 2 === 0 ? LIGHT_GREY : "white" }}>
+                    <td style={{ ...sf, padding: "9px 12px", fontSize: 13, color: "#666" }}>{row.label}</td>
+                    <td style={{ ...sf, padding: "9px 12px", fontSize: row.bold ? 14 : 13, fontWeight: row.bold ? 700 : 500, color: row.color ?? "#333", textAlign: "right" }}>{row.value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* INFRASTRUCTURE */}
+        <div style={{ backgroundColor: "#F0F4FF", borderLeft: `4px solid ${NAVY}`, margin: "0 24px", padding: "20px 24px", borderRadius: "0 8px 8px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ ...sf, fontSize: 15, fontWeight: 700, color: NAVY }}>Infrastructure Pipeline</span>
+            <span style={{ display: "inline-block", padding: "4px 14px", backgroundColor: NAVY, color: "white", borderRadius: 12, ...sf, fontSize: 12, fontWeight: 700 }}>
+              {infra?.infrastructureScore ?? 0}/10
+            </span>
+          </div>
+          {infra?.opportunitySummary && (
+            <p style={{ ...georgia, fontSize: 14, lineHeight: 1.7, color: "#444", marginBottom: (infra?.projects?.length ?? 0) > 0 ? 12 : 0 }}>
+              {infra.opportunitySummary}
+            </p>
+          )}
+          {(infra?.projects ?? []).length > 0 && (
+            <div style={{ borderTop: "1px solid #E5E7EB" }}>
+              {(infra?.projects ?? []).map((proj, i) => {
+                const statusColor = proj.status === "under-construction" ? GREEN : proj.status === "confirmed" ? "#2563EB" : AMBER;
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #E5E7EB" }}>
+                    <div>
+                      <span style={{ ...sf, fontSize: 14, fontWeight: 600, color: NAVY }}>{proj.name}</span>
+                      <span style={{ ...sf, fontSize: 12, color: "#888", marginLeft: 10 }}>{proj.distanceKm}km{proj.completionYear ? ` · Est. ${proj.completionYear}` : ""}</span>
+                    </div>
+                    <span style={{ ...sf, fontSize: 11, fontWeight: 700, color: statusColor, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {proj.status.replace("-", " ")}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* INVESTMENT THESIS */}
+        {investmentThesis && (
+          <div style={{ margin: "24px", padding: "24px", border: "1px solid #E5E7EB", borderRadius: 10 }}>
+            <div style={{ ...sf, fontSize: 10, letterSpacing: "0.15em", color: GOLD, marginBottom: 12, fontWeight: 700 }}>
+              INVESTMENT THESIS — YARDSCORE AI ANALYSIS
+            </div>
+            <p style={{ ...georgia, fontStyle: "italic", fontSize: 15, lineHeight: 1.9, color: "#333", margin: 0 }}
+               dangerouslySetInnerHTML={{ __html: investmentThesis.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }}
+            />
+          </div>
+        )}
+
+        {/* LISTING LINK */}
+        {listingUrl && (
+          <div style={{ padding: "0 24px 24px" }}>
+            <a href={listingUrl} target="_blank" rel="noopener noreferrer"
+              className="listing-btn"
+              style={{
+                display: "block", textAlign: "center", padding: "16px",
+                backgroundColor: "#2563EB", color: "white", borderRadius: 10,
+                ...sf, fontSize: 15, fontWeight: 600, textDecoration: "none",
+                transition: "background-color 0.2s, transform 0.15s",
+              }}
+            >
+              View current listings on {listingSiteName} →
+            </a>
+            <p style={{ ...sf, fontSize: 11, color: "#999", textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+              Yardscore analyses suburb fundamentals. Verify specific listing details independently.
+            </p>
+          </div>
         )}
       </div>
-      {children}
     </div>
   );
 }
 
-function fmt(n: number | null | undefined, prefix = "", suffix = "", fallback = "Estimating...") {
-  if (n === null || n === undefined) return fallback;
-  return `${prefix}${n.toLocaleString()}${suffix}`;
-}
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* MAIN REPORT PAGE                                                         */
+/* ═══════════════════════════════════════════════════════════════════════════ */
 
 export default function ReportPage() {
-  const [report, setReport] = useState<FinalReport | null>(null);
   const [multiReport, setMultiReport] = useState<MultiPropertyReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadHovered, setDownloadHovered] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
     const raw = localStorage.getItem("ys_report");
-    if (!raw) {
-      setError("No report found. Please complete the wizard first.");
-      return;
-    }
+    if (!raw) { setError("No report found. Please complete the wizard first."); return; }
     try {
       const parsed = JSON.parse(raw);
-      if (parsed.error) {
-        setError(parsed.error);
-      } else if (parsed.properties && Array.isArray(parsed.properties)) {
-        // Multi-property report
-        setMultiReport(parsed as MultiPropertyReport);
-        // Set first property as the "main" report for backwards compatibility
-        if (parsed.properties.length > 0) setReport(parsed.properties[0]);
-      } else {
-        setReport(parsed as FinalReport);
+      if (parsed.error) { setError(parsed.error); }
+      else if (parsed.properties && Array.isArray(parsed.properties)) { setMultiReport(parsed as MultiPropertyReport); }
+      else {
+        setMultiReport({
+          recommendedSuburbs: [parsed.property?.suburb ?? ""],
+          suburbReasoning: "",
+          properties: [parsed as FinalReport],
+          generatedAt: parsed.generatedAt ?? new Date().toISOString(),
+        });
       }
-    } catch {
-      setError("Failed to load report data.");
-    }
+    } catch { setError("Failed to load report data."); }
   }, []);
 
+  // Scroll shadow on navbar
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const handleDownloadPDF = useCallback(async () => {
+    try {
+      const wizardRaw = localStorage.getItem("ys_wizard");
+      const wizard = wizardRaw ? JSON.parse(wizardRaw) : {};
+      const reportRaw = localStorage.getItem("ys_report");
+      const reportData = reportRaw ? JSON.parse(reportRaw) : {};
+
+      const res = await fetch("/api/generate-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportData, wizardInputs: wizard }),
+      });
+
+      if (!res.ok) throw new Error("PDF generation failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Yardscore-Report-${new Date().toISOString().split("T")[0]}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch { window.print(); }
+  }, []);
+
+  /* Error state */
   if (error) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          backgroundColor: "#f5f5f7",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          ...sf,
-        }}
-      >
-        <div style={{ textAlign: "center", maxWidth: 400, padding: "0 24px" }}>
-          <div
-            style={{
-              width: 64,
-              height: 64,
-              borderRadius: "50%",
-              backgroundColor: "#fde8e8",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              margin: "0 auto 20px",
-            }}
-          >
+      <div style={{ minHeight: "100vh", backgroundColor: LIGHT_GREY, display: "flex", alignItems: "center", justifyContent: "center", ...sf }}>
+        <div style={{ textAlign: "center", maxWidth: 420, padding: "0 24px" }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", backgroundColor: "#FEF2F2", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
             <svg width={28} height={28} viewBox="0 0 28 28" fill="none">
-              <path
-                d="M14 9v6M14 19v1M4 14a10 10 0 1020 0A10 10 0 004 14z"
-                stroke="#c0392b"
-                strokeWidth={1.8}
-                strokeLinecap="round"
-              />
+              <path d="M14 9v6M14 19v1M4 14a10 10 0 1020 0A10 10 0 004 14z" stroke={RED} strokeWidth={1.8} strokeLinecap="round" />
             </svg>
           </div>
-          <h2
-            style={{
-              fontSize: 22,
-              fontWeight: 700,
-              color: "#1d1d1f",
-              letterSpacing: "-0.025em",
-              marginBottom: 10,
-            }}
-          >
-            Report not found
-          </h2>
-          <p
-            style={{
-              fontSize: 16,
-              color: "#86868b",
-              marginBottom: 28,
-              lineHeight: 1.6,
-            }}
-          >
-            {error}
-          </p>
-          <Link
-            href="/wizard"
-            style={{
-              display: "inline-block",
-              backgroundColor: "#0071e3",
-              color: "#fff",
-              fontSize: 16,
-              fontWeight: 600,
-              padding: "14px 28px",
-              borderRadius: 14,
-              textDecoration: "none",
-              letterSpacing: "-0.01em",
-            }}
-          >
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: NAVY, marginBottom: 10 }}>Report not found</h2>
+          <p style={{ fontSize: 16, color: "#888", marginBottom: 28, lineHeight: 1.6 }}>{error}</p>
+          <Link href="/wizard" style={{ display: "inline-block", backgroundColor: NAVY, color: GOLD, fontSize: 16, fontWeight: 600, padding: "14px 28px", borderRadius: 10, textDecoration: "none" }}>
             Start a new report
           </Link>
         </div>
@@ -385,1196 +542,208 @@ export default function ReportPage() {
     );
   }
 
-  // Build the list of properties to render
-  const allProperties: FinalReport[] = multiReport?.properties ?? (report ? [report] : []);
-
-  if (!report && allProperties.length === 0) {
+  /* Loading */
+  if (!multiReport) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          backgroundColor: "#fff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexDirection: "column",
-          gap: 16,
-        }}
-      >
-        <style>{`
-          @keyframes spin { to { transform: rotate(360deg); } }
-        `}</style>
-        <div style={{ position: "relative", width: 48, height: 48 }}>
-          <svg
-            width={48}
-            height={48}
-            viewBox="0 0 48 48"
-            style={{ animation: "spin 0.9s linear infinite" }}
-          >
-            <circle cx={24} cy={24} r={18} fill="none" stroke="#e8e8ed" strokeWidth={4} />
-            <circle
-              cx={24}
-              cy={24}
-              r={18}
-              fill="none"
-              stroke="#0071e3"
-              strokeWidth={4}
-              strokeLinecap="round"
-              strokeDasharray="28 84"
-            />
+      <div style={{ minHeight: "100vh", backgroundColor: "white", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ width: 48, height: 48 }}>
+          <svg width={48} height={48} viewBox="0 0 48 48" style={{ animation: "spin 0.9s linear infinite" }}>
+            <circle cx={24} cy={24} r={18} fill="none" stroke="#E5E7EB" strokeWidth={4} />
+            <circle cx={24} cy={24} r={18} fill="none" stroke={NAVY} strokeWidth={4} strokeLinecap="round" strokeDasharray="28 84" />
           </svg>
         </div>
-        <p style={{ fontSize: 15, color: "#86868b", letterSpacing: "-0.01em", ...sf }}>
-          Loading your report…
-        </p>
+        <p style={{ fontSize: 15, color: "#888", ...sf }}>Loading your report…</p>
       </div>
     );
   }
 
-  // Use first property for header/date but render all below
-  const firstReport = allProperties[0] ?? report;
-  if (!firstReport) return null;
+  const allProperties = multiReport.properties ?? [];
+  if (allProperties.length === 0) return null;
 
-  const property = firstReport.property ?? { address: "", suburb: "", state: "", postcode: "", lat: 0, lng: 0 };
-
-  const activeReport = report ?? firstReport;
-  const safeAnalysis = activeReport.analysis as unknown as Record<string, unknown> | undefined;
-  const analysis = {
-    address: (safeAnalysis?.address as string) ?? "",
-    lastSalePrice: (safeAnalysis?.lastSalePrice as number | null) ?? null,
-    lastSaleDate: (safeAnalysis?.lastSaleDate as string | null) ?? null,
-    landSize: (safeAnalysis?.landSize as number | null) ?? null,
-    bedrooms: (safeAnalysis?.bedrooms as number | null) ?? null,
-    bathrooms: (safeAnalysis?.bathrooms as number | null) ?? null,
-    yearBuilt: (safeAnalysis?.yearBuilt as number | null) ?? null,
-    priceHistory: (safeAnalysis?.priceHistory as { date: string; price: number }[]) ?? [],
-    comparables: (safeAnalysis?.comparables as { address: string; price: number; date: string; distanceM: number }[]) ?? [],
-    medianPricePerSqm: (safeAnalysis?.medianPricePerSqm as number | null) ?? null,
-    trendSummary: (safeAnalysis?.trendSummary as string) ?? "",
-  };
-
-  const safeRisk = activeReport.risk as unknown as Record<string, unknown> | undefined;
-  const risk = {
-    floodRisk: (safeRisk?.floodRisk as string) ?? "none",
-    bushfireRisk: (safeRisk?.bushfireRisk as string) ?? "none",
-    zoningCode: (safeRisk?.zoningCode as string) ?? "",
-    zoningDescription: (safeRisk?.zoningDescription as string) ?? "",
-    hasHeritage: (safeRisk?.hasHeritage as boolean) ?? false,
-    hasEasement: (safeRisk?.hasEasement as boolean) ?? false,
-    socialHousingPct: (safeRisk?.socialHousingPct as number | null) ?? null,
-    riskFlags: (safeRisk?.riskFlags as { label: string; severity: "green" | "amber" | "red" }[]) ?? [],
-    riskSummary: (safeRisk?.riskSummary as string) ?? "",
-  };
-
-  const safeInfra = activeReport.infrastructure as unknown as Record<string, unknown> | undefined;
-  const infrastructure = {
-    projects: (safeInfra?.projects as { name: string; type: string; status: string; distanceKm: number; completionYear: number | null }[]) ?? [],
-    supplyDemandSignal: (safeInfra?.supplyDemandSignal as string) ?? "balanced",
-    daysOnMarket: (safeInfra?.daysOnMarket as number | null) ?? null,
-    infrastructureScore: (safeInfra?.infrastructureScore as number) ?? 0,
-    opportunitySummary: (safeInfra?.opportunitySummary as string) ?? "",
-  };
-
-  const safeYield = activeReport.yield as unknown as Record<string, unknown> | undefined;
-  const yieldData = {
-    estimatedWeeklyRent: (safeYield?.estimatedWeeklyRent as number | null) ?? null,
-    grossYieldPct: (safeYield?.grossYieldPct as number | null) ?? null,
-    netYieldPct: (safeYield?.netYieldPct as number | null) ?? null,
-    vacancyRatePct: (safeYield?.vacancyRatePct as number | null) ?? null,
-    cashflowWeekly: (safeYield?.cashflowWeekly as number | null) ?? null,
-    rentalDemandSummary: (safeYield?.rentalDemandSummary as string) ?? "",
-  };
-
-  const safeVal = activeReport.valuation as unknown as Record<string, unknown> | undefined;
-  const valuation = {
-    fairValueLow: (safeVal?.fairValueLow as number) ?? 0,
-    fairValueMid: (safeVal?.fairValueMid as number) ?? 0,
-    fairValueHigh: (safeVal?.fairValueHigh as number) ?? 0,
-    askingPrice: (safeVal?.askingPrice as number | null) ?? null,
-    vendorExpectationGap: (safeVal?.vendorExpectationGap as number | null) ?? null,
-    negotiationHeadroomPct: (safeVal?.negotiationHeadroomPct as number | null) ?? null,
-    signal: ((safeVal?.signal as string) ?? "hold") as "buy" | "hold" | "avoid",
-    investmentThesis: (safeVal?.investmentThesis as string) ?? "",
-  };
-
-  const overallScore = activeReport.overallScore ?? 0;
-  const executiveSummary = activeReport.executiveSummary ?? "";
-  const generatedAt = activeReport.generatedAt ?? "";
-
+  const generatedAt = multiReport.generatedAt ?? allProperties[0]?.generatedAt ?? "";
   const reportDate = generatedAt
-    ? new Date(generatedAt).toLocaleDateString("en-AU", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      })
+    ? new Date(generatedAt).toLocaleDateString("en-AU", { day: "numeric", month: "long", year: "numeric" })
     : "—";
 
-  const scoreColor =
-    overallScore >= 7.5 ? "#34c759" : overallScore >= 5 ? "#ff9f0a" : "#ff3b30";
-  const scoreLabel =
-    overallScore >= 7.5 ? "Strong buy" : overallScore >= 5 ? "Moderate" : "Avoid";
+  const totalFound = multiReport.pipelineSummary?.candidatesFound ?? 0;
+  const totalPassed = multiReport.pipelineSummary?.candidatesPassed ?? 0;
 
   return (
-    <div style={{ backgroundColor: "#f5f5f7", minHeight: "100vh", ...sf }}>
+    <div style={{ backgroundColor: LIGHT_GREY, minHeight: "100vh", ...sf }}>
+      {/* ── STYLES ── */}
       <style>{`
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
         .report-fade { animation: fadeUp 0.5s cubic-bezier(0.16,1,0.3,1) both; }
+        .property-card:hover { box-shadow: 0 8px 32px rgba(0,0,0,0.1) !important; }
+        .listing-btn:hover { background-color: #1D4ED8 !important; transform: translateY(-1px); }
+
+        /* ── Print optimised stylesheet ── */
         @media print {
           .no-print { display: none !important; }
-          body { background: white; }
-        }
-        @media (max-width: 640px) {
-          .report-header-inner { flex-direction: column !important; align-items: flex-start !important; }
-          .metrics-grid { grid-template-columns: 1fr 1fr !important; }
-          .valuation-grid { grid-template-columns: 1fr !important; }
+          body, html { background: white !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          .report-fade { animation: none !important; }
+          .property-card { box-shadow: none !important; border: 1px solid #ddd !important; page-break-inside: avoid; }
+          .property-card:hover { box-shadow: none !important; }
+          main { padding: 0 !important; max-width: none !important; }
+          .two-col-grid { grid-template-columns: 1fr 1fr !important; }
           .risk-grid { grid-template-columns: 1fr 1fr !important; }
+          img { max-height: 160px !important; }
+          a { color: #333 !important; text-decoration: none !important; }
+          svg circle { transition: none !important; }
+        }
+
+        @media (max-width:768px) {
+          .two-col-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
 
-      {/* ── HEADER ── */}
-      <header
-        className="no-print"
-        style={{
-          backgroundColor: "#fff",
-          borderBottom: "0.5px solid #e8e8ed",
-          padding: "0 32px",
-          height: 64,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          position: "sticky",
-          top: 0,
-          zIndex: 100,
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          boxShadow: "0 1px 0 rgba(0,0,0,0.05)",
-        }}
-      >
-        <Link href="/" style={{ textDecoration: "none" }}>
-          <img src="/logo.svg" alt="Yardscore" style={{ height: 32, width: "auto" }} />
+      {/* ── STICKY NAVBAR ── */}
+      <header className="no-print" style={{
+        backgroundColor: scrolled ? "rgba(255,255,255,0.95)" : "white",
+        borderBottom: "1px solid #E5E7EB",
+        padding: "0 32px", height: 60,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        position: "sticky", top: 0, zIndex: 100,
+        backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
+        boxShadow: scrolled ? "0 2px 12px rgba(0,0,0,0.06)" : "none",
+        transition: "box-shadow 0.3s, background-color 0.3s",
+      }}>
+        <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 10 }}>
+          <YardscoreLogo size={24} dark />
+          <span style={{ ...sf, fontSize: 16, fontWeight: 700, color: NAVY }}>Yardscore</span>
         </Link>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontSize: 13, color: "#86868b", letterSpacing: "-0.01em" }}>
-            Generated {reportDate}
-          </span>
-          <button
-            onClick={() => window.print()}
-            onMouseEnter={() => setDownloadHovered(true)}
-            onMouseLeave={() => setDownloadHovered(false)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              backgroundColor: downloadHovered ? "#0077ed" : "#0071e3",
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 600,
-              padding: "10px 20px",
-              borderRadius: 10,
-              border: "none",
-              cursor: "pointer",
-              letterSpacing: "-0.01em",
-              transition: "background 0.2s, transform 0.15s, box-shadow 0.2s",
-              transform: downloadHovered ? "translateY(-1px)" : "none",
-              boxShadow: downloadHovered
-                ? "0 4px 16px rgba(0,113,227,0.45)"
-                : "0 2px 8px rgba(0,113,227,0.3)",
-              ...sf,
-            }}
-          >
-            <svg width={15} height={15} viewBox="0 0 15 15" fill="none">
-              <path
-                d="M7.5 1v9M4 7l3.5 3.5L11 7M2 12h11"
-                stroke="currentColor"
-                strokeWidth={1.7}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            Download PDF
-          </button>
-        </div>
+        <span style={{ ...sf, fontSize: 13, color: "#999" }}>Generated {reportDate}</span>
+        <button onClick={handleDownloadPDF}
+          onMouseEnter={() => setDownloadHovered(true)}
+          onMouseLeave={() => setDownloadHovered(false)}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 8,
+            backgroundColor: NAVY, color: GOLD,
+            fontSize: 14, fontWeight: 600, padding: "10px 22px", borderRadius: 8,
+            border: "none", cursor: "pointer",
+            transition: "transform 0.15s, box-shadow 0.2s",
+            transform: downloadHovered ? "translateY(-1px)" : "none",
+            boxShadow: downloadHovered ? `0 4px 16px rgba(15,31,61,0.4)` : `0 2px 8px rgba(15,31,61,0.25)`,
+            ...sf,
+          }}
+        >
+          <svg width={14} height={14} viewBox="0 0 15 15" fill="none">
+            <path d="M7.5 1v9M4 7l3.5 3.5L11 7M2 12h11" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Download PDF
+        </button>
       </header>
 
-      {/* ── MAIN ── */}
-      <main
-        className="report-fade"
-        style={{
-          maxWidth: 860,
-          margin: "0 auto",
-          padding: "40px 24px 100px",
-        }}
-      >
-        {/* ── SUBURB RECOMMENDATIONS (multi-property only) ── */}
-        {multiReport && (
-          <div
-            style={{
-              backgroundColor: "#fff",
-              borderRadius: 22,
-              padding: "32px 28px",
-              marginBottom: 16,
-              boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
-            }}
-          >
-            <p style={{ fontSize: 12, fontWeight: 700, color: "#0071e3", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14, ...sf }}>
-              AI-selected suburbs
+      {/* ── MAIN CONTENT ── */}
+      <main className="report-fade" style={{ maxWidth: 900, margin: "0 auto", padding: "36px 24px 100px" }}>
+
+        {/* ── SUBURB RATIONALE ── */}
+        {multiReport.suburbReasoning && (
+          <div style={{ backgroundColor: "white", borderRadius: 16, padding: "32px", marginBottom: 28, borderLeft: `4px solid ${GOLD}`, boxShadow: "0 2px 12px rgba(0,0,0,0.05)" }}>
+            <p style={{ ...sf, fontSize: 11, fontWeight: 700, color: "#2563EB", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
+              AI-SELECTED SUBURBS
             </p>
-            <h2 style={{ fontSize: 24, fontWeight: 700, color: "#1d1d1f", letterSpacing: "-0.03em", marginBottom: 16, ...sf }}>
-              Why these suburbs?
-            </h2>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
-              {multiReport.recommendedSuburbs.map((suburb) => (
-                <span
-                  key={suburb}
-                  style={{
-                    display: "inline-block",
-                    padding: "8px 18px",
-                    borderRadius: 980,
-                    backgroundColor: "#f0f0f5",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    color: "#1d1d1f",
-                    letterSpacing: "-0.01em",
-                    ...sf,
-                  }}
-                >
+            <h2 style={{ ...sf, fontSize: 24, fontWeight: 700, color: NAVY, marginBottom: 16 }}>Why these suburbs?</h2>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+              {(multiReport.recommendedSuburbs ?? []).map((suburb) => (
+                <span key={suburb} style={{ display: "inline-block", padding: "8px 20px", borderRadius: 20, backgroundColor: NAVY, color: "white", ...sf, fontSize: 14, fontWeight: 600 }}>
                   {suburb}
                 </span>
               ))}
             </div>
-            <p style={{ fontSize: 16, color: "#444", lineHeight: 1.7, margin: 0, ...sf }}>
-              <span dangerouslySetInnerHTML={{ __html: multiReport.suburbReasoning.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
-            </p>
+            <p style={{ ...sf, fontSize: 15, color: "#444", lineHeight: 1.75, margin: 0 }}
+               dangerouslySetInnerHTML={{ __html: multiReport.suburbReasoning.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }}
+            />
+
+            {/* Animated screening stats */}
             {multiReport.pipelineSummary && (
-              <div style={{ marginTop: 20, padding: "16px 20px", backgroundColor: "#f8fafc", borderRadius: 12, ...sf }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: "#1d1d1f", marginBottom: 8 }}>
-                  Screening summary: {multiReport.pipelineSummary.candidatesFound} candidates found, {multiReport.pipelineSummary.candidatesPassed} passed quality checks
-                </p>
-                {(multiReport.pipelineSummary.eliminated?.length ?? 0) > 0 && (
-                  <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>
-                    {(() => {
-                      const elim = multiReport.pipelineSummary.eliminated ?? [];
-                      const reasons: Record<string, number> = {};
-                      elim.forEach((e) => {
-                        const key = e.reason.includes("budget") || e.reason.includes("exceeds") ? "Price exceeded budget"
-                          : e.reason.includes("yield") ? "Could not achieve yield target"
-                          : e.reason.includes("flood") ? "High flood risk"
-                          : e.reason.includes("bushfire") ? "High bushfire risk"
-                          : e.reason.includes("bedroom") ? "Insufficient bedrooms"
-                          : e.reason.includes("zoning") ? "Non-residential zoning"
-                          : e.reason;
-                        reasons[key] = (reasons[key] ?? 0) + 1;
-                      });
-                      return Object.entries(reasons).map(([reason, count]) => (
-                        <span key={reason} style={{ display: "block" }}>{count} eliminated: {reason}</span>
-                      ));
-                    })()}
+              <div style={{
+                marginTop: 24,
+                background: `linear-gradient(135deg, ${NAVY} 0%, #1a3260 100%)`,
+                borderRadius: 12, padding: "20px 28px",
+                display: "flex", justifyContent: "space-around", textAlign: "center",
+              }}>
+                <div>
+                  <div style={{ ...sf, fontSize: 28, fontWeight: 800, color: "white" }}>
+                    <AnimatedNumber value={totalFound} />
                   </div>
-                )}
+                  <div style={{ ...sf, fontSize: 10, color: "rgba(255,255,255,0.5)", letterSpacing: "0.1em", marginTop: 4 }}>DISCOVERED</div>
+                </div>
+                <div style={{ width: 1, backgroundColor: "rgba(255,255,255,0.15)" }} />
+                <div>
+                  <div style={{ ...sf, fontSize: 28, fontWeight: 800, color: "white" }}>
+                    <AnimatedNumber value={totalPassed} />
+                  </div>
+                  <div style={{ ...sf, fontSize: 10, color: "rgba(255,255,255,0.5)", letterSpacing: "0.1em", marginTop: 4 }}>PASSED CHECKS</div>
+                </div>
+                <div style={{ width: 1, backgroundColor: "rgba(255,255,255,0.15)" }} />
+                <div>
+                  <div style={{ ...sf, fontSize: 28, fontWeight: 800, color: GOLD }}>
+                    <AnimatedNumber value={allProperties.length} />
+                  </div>
+                  <div style={{ ...sf, fontSize: 10, color: "rgba(255,255,255,0.5)", letterSpacing: "0.1em", marginTop: 4 }}>RECOMMENDED</div>
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ── ADDITIONAL PROPERTIES (compact cards for #2, #3, etc.) ── */}
+        {/* ── COMPARISON CHART ── */}
         {allProperties.length > 1 && (
-          <div style={{ marginBottom: 20 }}>
-            <p style={{ fontSize: 12, fontWeight: 700, color: "#0071e3", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, ...sf }}>
-              {allProperties.length} properties recommended
-            </p>
-            {allProperties.map((pr, idx) => {
-              const pp = pr.property ?? { address: "", suburb: "", state: "", postcode: "" };
-              const pv = pr.valuation as unknown as Record<string, unknown> | undefined;
-              const py = pr.yield as unknown as Record<string, unknown> | undefined;
-              const signal = String(pv?.signal ?? "hold").toLowerCase();
-              const scoreColor = pr.overallScore >= 7 ? "#16a34a" : pr.overallScore >= 5 ? "#d97706" : "#dc2626";
-              return (
-                <div
-                  key={idx}
-                  onClick={() => {
-                    // When clicking a card, swap the main report
-                    setReport(pr);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  style={{
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    backgroundColor: pr === report ? "#eff6ff" : "#fff",
-                    border: pr === report ? "2px solid #0071e3" : "1px solid #e5e7eb",
-                    borderRadius: 14, padding: "16px 20px", marginBottom: 8, cursor: "pointer",
-                    transition: "all 0.15s", ...sf,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", backgroundColor: scoreColor, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
-                      {pr.overallScore}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{ fontSize: 14, fontWeight: 600, color: "#1d1d1f", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        #{idx + 1} {pp.address?.split(",")[0] || "Property"}
-                      </p>
-                      <p style={{ fontSize: 12, color: "#86868b", margin: 0 }}>{pp.suburb} · Yield {Number(py?.grossYieldPct ?? 0).toFixed(1)}% · {signal.toUpperCase()}</p>
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 980, backgroundColor: signal === "buy" ? "#dcfce7" : signal === "avoid" ? "#fef2f2" : "#fef9c3", color: signal === "buy" ? "#16a34a" : signal === "avoid" ? "#dc2626" : "#a16207" }}>
-                    {signal.toUpperCase()}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          <ComparisonChart reports={allProperties} />
         )}
 
-        {/* ── WHY THIS PROPERTY ── */}
-        {activeReport.pipelineMeta && (
-          <div
+        {/* ── PROPERTY CARDS ── */}
+        {allProperties.map((currentReport, i) => (
+          <PropertyCard key={i} report={currentReport} index={i} total={allProperties.length} />
+        ))}
+
+        {/* ── BOTTOM BUTTONS ── */}
+        <div className="no-print" style={{ display: "flex", gap: 12, marginTop: 40, flexWrap: "wrap" }}>
+          <button onClick={handleDownloadPDF}
             style={{
-              backgroundColor: "#fff",
-              borderRadius: 18,
-              padding: "24px 28px",
-              marginBottom: 12,
-              boxShadow: "0 1px 6px rgba(0,0,0,0.05)",
-              border: "1px solid #e8f0fe",
-              ...sf,
+              flex: 1, minWidth: 200, backgroundColor: NAVY, color: GOLD,
+              fontSize: 17, fontWeight: 600, padding: "16px 24px", borderRadius: 10,
+              border: "none", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              transition: "transform 0.15s, box-shadow 0.2s",
+              boxShadow: `0 4px 16px rgba(15,31,61,0.3)`, ...sf,
             }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: "#0071e3" }} />
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#0071e3", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                Why this property made the report
-              </span>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-              <span style={{ fontSize: 12, backgroundColor: "#f0fdf4", color: "#16a34a", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
-                Passed {activeReport.pipelineMeta.checksRun.length} of {activeReport.pipelineMeta.checksRun.length} quality checks
-              </span>
-              <span style={{ fontSize: 12, backgroundColor: "#eff6ff", color: "#2563eb", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
-                Ranked #{activeReport.pipelineMeta.rankPosition} of {activeReport.pipelineMeta.candidatesPassed} candidates
-              </span>
-              <span style={{ fontSize: 12, backgroundColor: "#f5f3ff", color: "#7c3aed", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
-                Client score: {activeReport.pipelineMeta.clientScore}/10
-              </span>
-            </div>
-            <p style={{ fontSize: 13, color: "#64748b", margin: 0, lineHeight: 1.6 }}>
-              Selected from {activeReport.pipelineMeta.candidatesFound} initial candidates.
-              {" "}{activeReport.pipelineMeta.candidatesPassed} passed all hard filters (budget, bedrooms, flood, bushfire, zoning).
-              {" "}Ranked by {activeReport.pipelineMeta.clientGoal.toLowerCase()}.
-            </p>
-          </div>
-        )}
-
-        {/* ── PROPERTY HERO CARD ── */}
-        <div
-          style={{
-            backgroundColor: "#fff",
-            borderRadius: 22,
-            overflow: "hidden",
-            marginBottom: 16,
-            boxShadow: "0 2px 12px rgba(0,0,0,0.07)",
-          }}
-        >
-          {/* Suburb photo */}
-          {activeReport.suburbPhotoUrl && (
-            <img
-              src={activeReport.suburbPhotoUrl}
-              alt={property.suburb}
-              style={{ width: "100%", height: 200, objectFit: "cover", display: "block" }}
-            />
-          )}
-          {/* Dark header band */}
-          <div
-            style={{
-              background: "linear-gradient(135deg, #071020 0%, #0d2645 100%)",
-              padding: "28px 36px 32px",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                marginBottom: 18,
-              }}
-            >
-              <img src="/favicon.svg" alt="" style={{ width: 22, height: 22 }} />
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: "rgba(255,255,255,0.45)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                }}
-              >
-                Yardscore Investment Report
-              </span>
-            </div>
-            <div
-              className="report-header-inner"
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: 24,
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <h1
-                  style={{
-                    fontSize: "clamp(22px, 3.5vw, 34px)",
-                    fontWeight: 800,
-                    color: "#fff",
-                    letterSpacing: "-0.03em",
-                    marginBottom: 8,
-                    lineHeight: 1.1,
-                  }}
-                >
-                  {property.address}
-                </h1>
-                <p
-                  style={{
-                    fontSize: 16,
-                    color: "rgba(255,255,255,0.55)",
-                    margin: "0 0 20px",
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  {property.suburb}, {property.state} {property.postcode}
-                </p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  <SignalBadge signal={valuation.signal} />
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      backgroundColor: "rgba(255,255,255,0.1)",
-                      color: "rgba(255,255,255,0.7)",
-                      fontSize: 13,
-                      fontWeight: 500,
-                      padding: "7px 14px",
-                      borderRadius: 980,
-                    }}
-                  >
-                    Generated {reportDate}
-                  </span>
-                </div>
-              </div>
-              <ScoreGauge score={overallScore} />
-            </div>
-          </div>
-
-          {/* Executive summary */}
-          <div style={{ padding: "28px 36px 32px", borderBottom: "0.5px solid #e8e8ed" }}>
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: "#86868b",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-                marginBottom: 12,
-              }}
-            >
-              Executive Summary
-            </p>
-            <p
-              style={{
-                fontSize: 17,
-                color: "#1d1d1f",
-                lineHeight: 1.72,
-                margin: 0,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {executiveSummary}
-            </p>
-          </div>
-
-          {/* Key metrics strip */}
-          <div
-            className="metrics-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-            }}
-          >
-            {[
-              {
-                label: "Gross yield",
-                value: fmt(yieldData.grossYieldPct, "", "%"),
-                positive: (yieldData.grossYieldPct ?? 0) >= 4,
-              },
-              {
-                label: "Net yield",
-                value: fmt(yieldData.netYieldPct, "", "%"),
-                positive: (yieldData.netYieldPct ?? 0) >= 3,
-              },
-              {
-                label: "Weekly cashflow",
-                value: fmt(yieldData.cashflowWeekly, "$"),
-                positive: (yieldData.cashflowWeekly ?? 0) > 0,
-              },
-              {
-                label: "Weekly rent est.",
-                value: fmt(yieldData.estimatedWeeklyRent, "$"),
-                positive: true,
-              },
-            ].map((m, i) => (
-              <div
-                key={m.label}
-                style={{
-                  padding: "22px 20px",
-                  borderLeft: i > 0 ? "0.5px solid #e8e8ed" : "none",
-                  textAlign: "center",
-                }}
-              >
-                <p
-                  style={{ fontSize: 12, color: "#86868b", margin: "0 0 6px" }}
-                >
-                  {m.label}
-                </p>
-                <p
-                  style={{
-                    fontSize: 24,
-                    fontWeight: 800,
-                    color: m.positive ? "#1d1d1f" : "#ff3b30",
-                    letterSpacing: "-0.035em",
-                    margin: 0,
-                    lineHeight: 1,
-                  }}
-                >
-                  {m.value}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── VALUATION ── */}
-        <Section
-          title="Valuation Analysis"
-          badge={
-            valuation.negotiationHeadroomPct && valuation.negotiationHeadroomPct > 0
-              ? {
-                  label: `${valuation.negotiationHeadroomPct}% headroom`,
-                  color: "#1a7f37",
-                  bg: "#d1f7dc",
-                }
-              : undefined
-          }
-        >
-          {/* Fair value range */}
-          <div
-            className="valuation-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 12,
-              marginBottom: 24,
-            }}
-          >
-            {[
-              {
-                label: "Low estimate",
-                value: fmt(valuation.fairValueLow, "$"),
-                accent: false,
-              },
-              {
-                label: "Mid estimate",
-                value: fmt(valuation.fairValueMid, "$"),
-                accent: true,
-              },
-              {
-                label: "High estimate",
-                value: fmt(valuation.fairValueHigh, "$"),
-                accent: false,
-              },
-            ].map((v) => (
-              <div
-                key={v.label}
-                style={{
-                  borderRadius: 16,
-                  padding: "20px 18px",
-                  textAlign: "center",
-                  backgroundColor: v.accent ? "#e8f0fe" : "#f5f5f7",
-                  border: v.accent ? "1px solid rgba(0,113,227,0.2)" : "none",
-                }}
-              >
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: v.accent ? "#0071e3" : "#86868b",
-                    marginBottom: 8,
-                    fontWeight: v.accent ? 700 : 400,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.04em",
-                  }}
-                >
-                  {v.label}
-                </p>
-                <p
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 800,
-                    color: v.accent ? "#0071e3" : "#1d1d1f",
-                    letterSpacing: "-0.03em",
-                    margin: 0,
-                  }}
-                >
-                  {v.value}
-                </p>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ borderTop: "0.5px solid #e8e8ed" }}>
-            {valuation.askingPrice !== null && valuation.askingPrice !== undefined && (
-              <MetricRow label="Asking price" value={fmt(valuation.askingPrice, "$")} />
-            )}
-            {valuation.negotiationHeadroomPct !== null &&
-              valuation.negotiationHeadroomPct !== undefined && (
-                <MetricRow
-                  label="Negotiation headroom"
-                  value={fmt(valuation.negotiationHeadroomPct, "", "%")}
-                  accent
-                />
-              )}
-          </div>
-
-          {valuation.investmentThesis && (
-            <div
-              style={{
-                backgroundColor: "#f5f5f7",
-                borderRadius: 14,
-                padding: "18px 22px",
-                marginTop: 20,
-              }}
-            >
-              <p
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: "#86868b",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                  marginBottom: 10,
-                }}
-              >
-                Investment thesis
-              </p>
-              <p
-                style={{
-                  fontSize: 15,
-                  color: "#1d1d1f",
-                  lineHeight: 1.72,
-                  margin: 0,
-                  letterSpacing: "-0.01em",
-                }}
-              >
-                {valuation.investmentThesis}
-              </p>
-            </div>
-          )}
-        </Section>
-
-        {/* ── RISK OVERVIEW ── */}
-        <Section title="Risk Overview">
-          {/* Risk grid */}
-          <div
-            className="risk-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: 12,
-              marginBottom: 24,
-            }}
-          >
-            {[
-              { label: "Flood risk", value: risk.floodRisk },
-              { label: "Bushfire risk", value: risk.bushfireRisk },
-              { label: "Heritage", value: risk.hasHeritage ? "Yes" : "No" },
-              { label: "Easement", value: risk.hasEasement ? "Yes" : "No" },
-            ].map((r) => {
-              const isGood =
-                r.value === "none" || r.value === "low" || r.value === "No";
-              const isBad =
-                r.value === "high" || r.value === "Yes";
-              const isWarn = !isGood && !isBad;
-              const color = isGood ? "#34c759" : isBad ? "#ff3b30" : "#ff9f0a";
-              const bg = isGood
-                ? "#d1f7dc"
-                : isBad
-                ? "#fde8e8"
-                : "#fff3cd";
-              const textColor = isGood
-                ? "#1a7f37"
-                : isBad
-                ? "#c0392b"
-                : "#856404";
-              return (
-                <div
-                  key={r.label}
-                  style={{
-                    backgroundColor: bg,
-                    borderRadius: 14,
-                    padding: "18px 16px",
-                    textAlign: "center",
-                  }}
-                >
-                  <p
-                    style={{
-                      fontSize: 12,
-                      color: textColor,
-                      marginBottom: 8,
-                      fontWeight: 600,
-                      opacity: 0.7,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    {r.label}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 17,
-                      fontWeight: 800,
-                      color: textColor,
-                      textTransform: "capitalize",
-                      margin: 0,
-                      letterSpacing: "-0.01em",
-                    }}
-                  >
-                    {r.value}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Risk pills */}
-          {(risk.riskFlags ?? []).length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
-              {(risk.riskFlags ?? []).map((f, i) => (
-                <RiskPill key={i} severity={f.severity} label={f.label} />
-              ))}
-            </div>
-          )}
-
-          {risk.zoningCode && (
-          <MetricRow
-            label="Zoning"
-            value={`${risk.zoningCode}${risk.zoningDescription ? ` — ${risk.zoningDescription}` : ""}`}
-          />
-          )}
-
-          {risk.riskSummary && (
-            <p
-              style={{
-                fontSize: 15,
-                color: "#86868b",
-                lineHeight: 1.72,
-                marginTop: 18,
-                marginBottom: 0,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {risk.riskSummary}
-            </p>
-          )}
-        </Section>
-
-        {/* ── RENTAL DEMAND ── */}
-        <Section title="Rental Demand & Yield">
-          <div style={{ borderTop: "0.5px solid #e8e8ed" }}>
-            <MetricRow
-              label="Estimated weekly rent"
-              value={fmt(yieldData.estimatedWeeklyRent, "$")}
-            />
-            <MetricRow
-              label="Gross yield"
-              value={fmt(yieldData.grossYieldPct, "", "%")}
-            />
-            <MetricRow
-              label="Net yield"
-              value={fmt(yieldData.netYieldPct, "", "%")}
-            />
-            <MetricRow
-              label="Vacancy rate"
-              value={fmt(yieldData.vacancyRatePct, "", "%")}
-            />
-            <MetricRow
-              label="Weekly cashflow"
-              value={fmt(yieldData.cashflowWeekly, "$")}
-              accent
-            />
-          </div>
-          {yieldData.rentalDemandSummary && (
-            <p
-              style={{
-                fontSize: 15,
-                color: "#86868b",
-                lineHeight: 1.72,
-                marginTop: 18,
-                marginBottom: 0,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {yieldData.rentalDemandSummary}
-            </p>
-          )}
-        </Section>
-
-        {/* ── PROPERTY DETAILS ── */}
-        <Section title="Property Details">
-          <div style={{ borderTop: "0.5px solid #e8e8ed" }}>
-            <MetricRow label="Bedrooms" value={fmt(analysis.bedrooms)} />
-            <MetricRow label="Bathrooms" value={fmt(analysis.bathrooms)} />
-            <MetricRow
-              label="Land size"
-              value={
-                analysis.landSize
-                  ? `${analysis.landSize.toLocaleString()} m²`
-                  : "—"
-              }
-            />
-            <MetricRow label="Year built" value={fmt(analysis.yearBuilt)} />
-            <MetricRow
-              label="Last sale price"
-              value={
-                analysis.lastSalePrice
-                  ? `$${analysis.lastSalePrice.toLocaleString()}`
-                  : "—"
-              }
-            />
-            <MetricRow
-              label="Last sale date"
-              value={analysis.lastSaleDate ?? "—"}
-            />
-          </div>
-          {analysis.trendSummary && (
-            <p
-              style={{
-                fontSize: 15,
-                color: "#86868b",
-                lineHeight: 1.72,
-                marginTop: 20,
-                marginBottom: 0,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {analysis.trendSummary}
-            </p>
-          )}
-        </Section>
-
-        {/* ── INFRASTRUCTURE ── */}
-        <Section title="Infrastructure & Opportunity">
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              marginBottom: 24,
-              flexWrap: "wrap",
-            }}
-          >
-            {/* Supply/demand signal */}
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                padding: "7px 16px",
-                borderRadius: 980,
-                textTransform: "capitalize",
-                backgroundColor:
-                  infrastructure.supplyDemandSignal === "undersupplied"
-                    ? "#d1f7dc"
-                    : infrastructure.supplyDemandSignal === "balanced"
-                    ? "#fff3cd"
-                    : "#fde8e8",
-                color:
-                  infrastructure.supplyDemandSignal === "undersupplied"
-                    ? "#1a7f37"
-                    : infrastructure.supplyDemandSignal === "balanced"
-                    ? "#856404"
-                    : "#c0392b",
-              }}
-            >
-              {infrastructure.supplyDemandSignal}
-            </span>
-
-            {infrastructure.daysOnMarket !== null && infrastructure.daysOnMarket !== undefined && (
-              <span style={{ fontSize: 14, color: "#86868b" }}>
-                Avg days on market:{" "}
-                <strong style={{ color: "#1d1d1f", fontWeight: 700 }}>
-                  {infrastructure.daysOnMarket}
-                </strong>
-              </span>
-            )}
-            <span style={{ fontSize: 14, color: "#86868b", marginLeft: "auto" }}>
-              Infrastructure score:{" "}
-              <strong style={{ color: "#1d1d1f", fontWeight: 700 }}>
-                {infrastructure.infrastructureScore ?? 0}/10
-              </strong>
-            </span>
-          </div>
-
-          {(infrastructure.projects ?? []).length > 0 && (
-            <div style={{ borderTop: "0.5px solid #e8e8ed", marginBottom: 16 }}>
-              {(infrastructure.projects ?? []).map((p, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "16px 0",
-                    borderBottom: "0.5px solid #e8e8ed",
-                    gap: 16,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div>
-                    <p
-                      style={{
-                        fontSize: 15,
-                        color: "#1d1d1f",
-                        fontWeight: 600,
-                        marginBottom: 3,
-                        letterSpacing: "-0.01em",
-                      }}
-                    >
-                      {p.name}
-                    </p>
-                    <p style={{ fontSize: 13, color: "#86868b", margin: 0 }}>
-                      {p.type} · {p.distanceKm}km away
-                      {p.completionYear ? ` · Est. ${p.completionYear}` : ""}
-                    </p>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      padding: "5px 14px",
-                      borderRadius: 980,
-                      backgroundColor:
-                        p.status === "under-construction"
-                          ? "#d1f7dc"
-                          : p.status === "confirmed"
-                          ? "#e8f0fe"
-                          : "#f5f5f7",
-                      color:
-                        p.status === "under-construction"
-                          ? "#1a7f37"
-                          : p.status === "confirmed"
-                          ? "#0071e3"
-                          : "#86868b",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {p.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {infrastructure.opportunitySummary && (
-            <p
-              style={{
-                fontSize: 15,
-                color: "#86868b",
-                lineHeight: 1.72,
-                margin: 0,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {infrastructure.opportunitySummary}
-            </p>
-          )}
-        </Section>
-
-        {/* ── COMPARABLE SALES ── */}
-        {(analysis.comparables ?? []).length > 0 && (
-          <Section title="Comparable Sales">
-            <div style={{ borderTop: "0.5px solid #e8e8ed" }}>
-              {(analysis.comparables ?? []).map((c, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "16px 0",
-                    borderBottom: "0.5px solid #e8e8ed",
-                    gap: 16,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <div>
-                    <p
-                      style={{
-                        fontSize: 15,
-                        color: "#1d1d1f",
-                        fontWeight: 600,
-                        marginBottom: 3,
-                        letterSpacing: "-0.01em",
-                      }}
-                    >
-                      {c.address}
-                    </p>
-                    <p style={{ fontSize: 13, color: "#86868b", margin: 0 }}>
-                      {c.date} · {c.distanceM}m away
-                    </p>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 18,
-                      fontWeight: 800,
-                      color: "#1d1d1f",
-                      letterSpacing: "-0.02em",
-                      flexShrink: 0,
-                    }}
-                  >
-                    ${c.price.toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </Section>
-        )}
-
-        {/* ── ACTION BUTTONS ── */}
-        <div
-          className="no-print"
-          style={{ display: "flex", gap: 12, marginTop: 40, flexWrap: "wrap" }}
-        >
-          <button
-            onClick={() => window.print()}
-            style={{
-              flex: 1,
-              minWidth: 200,
-              backgroundColor: "#0071e3",
-              color: "#fff",
-              fontSize: 17,
-              fontWeight: 600,
-              padding: "16px 24px",
-              borderRadius: 14,
-              border: "none",
-              cursor: "pointer",
-              letterSpacing: "-0.015em",
-              transition: "background 0.2s, transform 0.15s, box-shadow 0.2s",
-              boxShadow: "0 4px 16px rgba(0,113,227,0.35)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              ...sf,
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.backgroundColor = "#0077ed";
-              e.currentTarget.style.transform = "translateY(-1px)";
-              e.currentTarget.style.boxShadow = "0 6px 20px rgba(0,113,227,0.45)";
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.backgroundColor = "#0071e3";
-              e.currentTarget.style.transform = "none";
-              e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,113,227,0.35)";
-            }}
+            onMouseOver={(e) => { e.currentTarget.style.transform = "translateY(-1px)"; }}
+            onMouseOut={(e) => { e.currentTarget.style.transform = "none"; }}
           >
             <svg width={17} height={17} viewBox="0 0 17 17" fill="none">
-              <path
-                d="M8.5 1.5v10M5 8.5l3.5 4L12 8.5M2 13.5h13"
-                stroke="currentColor"
-                strokeWidth={1.8}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <path d="M8.5 1.5v10M5 8.5l3.5 4L12 8.5M2 13.5h13" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Download PDF report
+            Download PDF Report
           </button>
-          <Link
-            href="/wizard"
+          <Link href="/wizard"
             style={{
-              flex: 1,
-              minWidth: 160,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              textAlign: "center",
-              backgroundColor: "#fff",
-              color: "#1d1d1f",
-              fontSize: 17,
-              fontWeight: 500,
-              padding: "16px 24px",
-              borderRadius: 14,
-              border: "1.5px solid #e8e8ed",
-              textDecoration: "none",
-              letterSpacing: "-0.015em",
-              transition: "border-color 0.15s",
+              flex: 1, minWidth: 160, display: "flex", alignItems: "center", justifyContent: "center",
+              backgroundColor: "white", color: NAVY, fontSize: 17, fontWeight: 500,
+              padding: "16px 24px", borderRadius: 10, border: `1.5px solid #E5E7EB`,
+              textDecoration: "none", transition: "border-color 0.15s",
             }}
-            onMouseOver={(e) => (e.currentTarget.style.borderColor = "#1d1d1f")}
-            onMouseOut={(e) => (e.currentTarget.style.borderColor = "#e8e8ed")}
+            onMouseOver={(e) => (e.currentTarget.style.borderColor = NAVY)}
+            onMouseOut={(e) => (e.currentTarget.style.borderColor = "#E5E7EB")}
           >
-            New report →
+            Start a new search →
           </Link>
         </div>
 
-        {/* Listing search link */}
-        {activeReport.listingSearchUrl && (
-          <div style={{ marginBottom: 16 }}>
-            <a
-              href={activeReport.listingSearchUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "block",
-                textAlign: "center",
-                padding: "14px",
-                backgroundColor: "#0071e3",
-                color: "#fff",
-                borderRadius: 12,
-                fontFamily: "system-ui",
-                fontSize: 15,
-                fontWeight: 600,
-                textDecoration: "none",
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {activeReport.listingSearchUrl?.includes("homely.com.au")
-                ? `View on Homely.com.au — ${property.suburb} →`
-                : activeReport.listingSearchUrl?.includes("view.com.au")
-                ? `View on View.com.au — ${property.suburb} →`
-                : activeReport.listingSearchUrl?.includes("domain.com.au")
-                ? `View on Domain.com.au — ${property.suburb} →`
-                : `Search current listings in ${property.suburb} →`}
-            </a>
-            <p style={{ fontSize: 12, color: "#86868b", textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
-              Yardscore analyses suburb fundamentals — verify specific listing details independently.
-            </p>
+        {/* ── FOOTER ── */}
+        <div style={{ borderTop: "1px solid #E5E7EB", marginTop: 56, paddingTop: 28, textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+            <YardscoreLogo size={24} dark />
           </div>
-        )}
-
-        {/* Report footer */}
-        <div
-          style={{
-            borderTop: "0.5px solid #e8e8ed",
-            marginTop: 56,
-            paddingTop: 28,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 12,
-          }}
-        >
-          <img src="/logo.svg" alt="Yardscore" style={{ height: 22, width: "auto", opacity: 0.5 }} />
-          <p style={{ fontSize: 12, color: "#86868b", margin: 0 }}>
-            This report is for research purposes only and does not constitute financial
-            advice.
+          <p style={{ ...sf, fontSize: 12, color: "#999", lineHeight: 1.6, maxWidth: 600, margin: "0 auto 8px" }}>
+            This report is for research and information purposes only and does not constitute financial, investment, legal or taxation advice.
+            Property investment involves risk including possible loss of capital.
+          </p>
+          <p style={{ ...sf, fontSize: 11, color: "#bbb" }}>
+            © {new Date().getFullYear()} Yardscore · yardscore.com.au · hello@yardscore.com.au
           </p>
         </div>
       </main>
