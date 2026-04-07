@@ -184,17 +184,31 @@ export async function scrapeAllHomesListings(
       });
       console.log(`[allhomes] Found ${images.length} listing photos`);
 
+      // Extract real listing page URLs from the page (format: /43-sydney-street-redcliffe-qld-4020)
+      const detailUrls: string[] = [];
+      $("a[href]").each((_, el) => {
+        const href = $(el).attr("href") || "";
+        // Match property detail pages — contain suburb slug + state + postcode in the path
+        if (href.includes(`-${stateSlug}-${postcode}`) && !href.includes("/sale/") && !href.includes("/sold/") && !href.includes("/agency/") && !href.includes("/browse") && !href.includes("/search") && !href.includes("/ah/")) {
+          const full = href.startsWith("http") ? href : `https://www.allhomes.com.au${href}`;
+          if (!detailUrls.includes(full)) detailUrls.push(full);
+        }
+      });
+      console.log(`[allhomes] Found ${detailUrls.length} detail page URLs`);
+
       // Extract listing data from page text
       const bodyText = $("body").text().replace(/\n/g, "");
       const listings = extractListingsFromText(bodyText, suburb, state, postcode, maxBudget, minBedrooms, propertyType);
 
-      // Enrich with photos and IDs
+      // Enrich with photos, IDs, and detail page URLs
       for (let i = 0; i < listings.length; i++) {
         if (i < images.length) listings[i].photoUrl = images[i];
-        if (i < listingIds.length) {
-          listings[i].listingId = listingIds[i];
-          listings[i].listingUrl = `https://www.allhomes.com.au/sale/${suburbSlug}-${stateSlug}-${postcode}/?pid=${listingIds[i]}`;
-        }
+        if (i < listingIds.length) listings[i].listingId = listingIds[i];
+
+        // Match listing to a detail URL by address
+        const addrSlug = listings[i].address.split(",")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const matchedUrl = detailUrls.find((u) => u.toLowerCase().includes(addrSlug));
+        listings[i].listingUrl = matchedUrl || (listingIds[i] ? `https://www.allhomes.com.au/sale/${suburbSlug}-${stateSlug}-${postcode}/?pid=${listingIds[i]}` : `https://www.allhomes.com.au/sale/${suburbSlug}-${stateSlug}-${postcode}/`);
       }
 
       if (listings.length > 0) {
@@ -217,4 +231,98 @@ export async function scrapeAllHomesListings(
 
   console.log("[allhomes] All URLs exhausted — returning empty");
   return [];
+}
+
+// ---------------------------------------------------------------------------
+// Detail page scraper — enriches a listing with price, size, description
+// ---------------------------------------------------------------------------
+
+export interface AllHomesDetail {
+  price: number | null;
+  priceDisplay: string;
+  landSizeM2: number | null;
+  houseSizeM2: number | null;
+  yearBuilt: number | null;
+  description: string | null;
+  fullPhotoUrl: string | null;
+  priceHistory: { date: string; price: number }[];
+}
+
+export async function scrapeAllHomesDetail(listingUrl: string): Promise<AllHomesDetail | null> {
+  if (!listingUrl || !listingUrl.includes("allhomes.com.au")) return null;
+
+  try {
+    console.log("[allhomes-detail] Fetching:", listingUrl);
+    const r = await axios.get(listingUrl, { timeout: 15_000, headers: HEADERS });
+    const html = r.data as string;
+    const $ = cheerio.load(html);
+    const bodyText = $("body").text().replace(/\s+/g, " ");
+
+    // 1. Extract from JSON-LD (most reliable)
+    let price: number | null = null;
+    let priceDisplay = "Contact agent";
+    let description: string | null = null;
+    let fullPhotoUrl: string | null = null;
+
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html() || "");
+        if (json["@type"] === "RealEstateListing") {
+          if (json.primaryImageOfPage) fullPhotoUrl = json.primaryImageOfPage;
+          if (json.mainEntity?.description) description = json.mainEntity.description;
+        }
+      } catch {}
+    });
+
+    // 2. Extract price from body text
+    const pricePatterns = [
+      /(?:Offers?\s*(?:Over|From|Above))\s*\$\s*([\d,]+)/i,
+      /(?:Price\s*Guide|Asking)\s*\$\s*([\d,]+)/i,
+      /\$\s*([\d,]{6,})/,
+    ];
+    for (const pat of pricePatterns) {
+      const m = bodyText.match(pat);
+      if (m) {
+        price = parseInt(m[1].replace(/,/g, ""), 10);
+        if (price > 10000) {
+          priceDisplay = `$${price.toLocaleString()}`;
+          break;
+        }
+        price = null;
+      }
+    }
+
+    // 3. Extract sizes
+    let landSizeM2: number | null = null;
+    let houseSizeM2: number | null = null;
+
+    const landMatch = bodyText.match(/(?:Land|Block)\s*(?:size|area)?[:\s]*(\d[\d,]*)\s*m/i);
+    if (landMatch) landSizeM2 = parseInt(landMatch[1].replace(/,/g, ""), 10);
+
+    const houseMatch = bodyText.match(/(?:House|Floor|Building|Unit\s*\/\s*Apartment)\s*size[:\s]*(\d[\d,]*)\s*m/i);
+    if (houseMatch) houseSizeM2 = parseInt(houseMatch[1].replace(/,/g, ""), 10);
+
+    // 4. Year built
+    let yearBuilt: number | null = null;
+    const yearMatch = bodyText.match(/(?:Year\s*built|Built\s*in?)[:\s]*(\d{4})/i);
+    if (yearMatch) yearBuilt = parseInt(yearMatch[1], 10);
+
+    // 5. Price history (sold prices on the page)
+    const priceHistory: { date: string; price: number }[] = [];
+    const soldPattern = /(?:Sold|Last\s*sold)\s*(?:on|for)?\s*(?:\w+\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{4})\s*(?:for)?\s*\$\s*([\d,]+)/gi;
+    let soldMatch;
+    while ((soldMatch = soldPattern.exec(bodyText)) !== null) {
+      const soldPrice = parseInt(soldMatch[1].replace(/,/g, ""), 10);
+      if (soldPrice > 10000) {
+        priceHistory.push({ date: soldMatch[0].match(/\d{4}/)![0], price: soldPrice });
+      }
+    }
+
+    console.log(`[allhomes-detail] Price: ${priceDisplay} | Land: ${landSizeM2}m² | House: ${houseSizeM2}m² | Photo: ${fullPhotoUrl ? "YES" : "NO"}`);
+
+    return { price, priceDisplay, landSizeM2, houseSizeM2, yearBuilt, description, fullPhotoUrl, priceHistory };
+  } catch (e) {
+    console.log("[allhomes-detail] Failed:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
 }
