@@ -318,31 +318,55 @@ export async function scrapeAllHomesDetail(listingUrl: string): Promise<AllHomes
     let description: string | null = null;
     let fullPhotoUrl: string | null = null;
 
+    let jsonLdBeds: number | null = null;
+    let jsonLdBaths: number | null = null;
+
     $('script[type="application/ld+json"]').each((_, el) => {
       try {
         const json = JSON.parse($(el).html() || "");
         if (json["@type"] === "RealEstateListing") {
           if (json.primaryImageOfPage) fullPhotoUrl = json.primaryImageOfPage;
           if (json.mainEntity?.description) description = json.mainEntity.description;
+          if (json.mainEntity?.numberOfBedrooms) jsonLdBeds = parseInt(json.mainEntity.numberOfBedrooms, 10);
+          if (json.mainEntity?.numberOfBathroomsTotal) jsonLdBaths = parseInt(json.mainEntity.numberOfBathroomsTotal, 10);
         }
       } catch {}
     });
 
-    // 2. Extract price from body text
-    const pricePatterns = [
-      /(?:Offers?\s*(?:Over|From|Above))\s*\$\s*([\d,]+)/i,
-      /(?:Price\s*Guide|Asking)\s*\$\s*([\d,]+)/i,
-      /\$\s*([\d,]{6,})/,
-    ];
-    for (const pat of pricePatterns) {
-      const m = bodyText.match(pat);
-      if (m) {
-        price = parseInt(m[1].replace(/,/g, ""), 10);
-        if (price > 10000) {
-          priceDisplay = `$${price.toLocaleString()}`;
-          break;
+    // 2. Try JSON-LD offers.price first (most reliable)
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const json = JSON.parse($(el).html() || "");
+        const offerPrice = json?.offers?.price ?? json?.offers?.lowPrice;
+        if (offerPrice) {
+          const p = parseInt(String(offerPrice).replace(/[^0-9]/g, ""), 10);
+          if (p >= 50_000) { price = p; priceDisplay = `$${p.toLocaleString()}`; }
         }
-        price = null;
+      } catch {}
+    });
+
+    // 3. Extract price from body text using comma-format regex
+    if (!price) {
+      const pricePatterns = [
+        /(?:Offers?\s*(?:Over|From|Above))\s*\$\s*(\d{1,3}(?:,\d{3}){1,2})/i,
+        /(?:Price\s*Guide|Asking)\s*\$\s*(\d{1,3}(?:,\d{3}){1,2})/i,
+        /\$\s*(\d{1,3}(?:,\d{3}){1,2})/,
+      ];
+      for (const pat of pricePatterns) {
+        const m = bodyText.match(pat);
+        if (m) {
+          const p = parseInt(m[1].replace(/,/g, ""), 10);
+          if (p >= 50_000) { price = p; priceDisplay = `$${p.toLocaleString()}`; break; }
+        }
+      }
+    }
+
+    // 4. Try $X.XM format
+    if (!price) {
+      const mMatch = bodyText.match(/\$([\d.]+)\s*[mM]/);
+      if (mMatch) {
+        const val = Math.round(parseFloat(mMatch[1]) * 1_000_000);
+        if (val >= 50_000) { price = val; priceDisplay = `$${val.toLocaleString()}`; }
       }
     }
 
