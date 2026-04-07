@@ -9,6 +9,7 @@ import {
 } from "@/lib/investors-handbook";
 import { getInsightsForState, getLatestSentiment } from "@/lib/research-cache";
 import { KnowledgeStore } from "@/lib/knowledge-store";
+import { askClaude } from "@/lib/claude";
 
 export interface SuburbSelection {
   suburbs: string[];
@@ -39,141 +40,156 @@ export async function selectBestSuburbs(
   yieldTarget: number,
   primaryGoal: string
 ): Promise<SuburbSelection> {
-  // Source 1: Our curated intelligence picks
+  // ── Gather all intelligence sources ──
+
+  // Source 1: Our curated picks for this budget tier
   const picks = getTopPicksForBudget(state, maxBudget);
 
-  // Source 2: Investors Handbook research data
+  // Source 2: Handbook research data
   const handbookGoal = toGoal(primaryGoal);
   const handbookTier = toBudgetTier(maxBudget);
-  const handbookSuburbs = querySuburbs({
-    state: state as State,
-    budgetTier: handbookTier,
-    investmentGoal: handbookGoal,
-  });
-
-  // Also get top suburbs by the user's preferred metric from handbook
+  const handbookSuburbs = querySuburbs({ state: state as State, budgetTier: handbookTier, investmentGoal: handbookGoal });
   const metricType = handbookGoal === "yield" ? "yield" : handbookGoal === "growth" ? "growth" : "combined";
-  const topByMetric = getTopSuburbsByMetric(metricType, state as State, handbookTier, 5);
+  const topByMetric = getTopSuburbsByMetric(metricType, state as State, handbookTier, 8);
 
-  console.log(`[suburb-selector] Intelligence picks: ${picks.map((p) => p.suburb).join(", ")}`);
-  console.log(`[suburb-selector] Handbook matches: ${handbookSuburbs.map((s) => s.suburb).join(", ")}`);
-  console.log(`[suburb-selector] Handbook top by ${metricType}: ${topByMetric.map((s) => s.suburb).join(", ")}`);
-
-  if (!picks || picks.length === 0) {
-    // Fall back to handbook data only
-    if (topByMetric.length > 0) {
-      const top3 = topByMetric.slice(0, 3);
-      return {
-        suburbs: top3.map((s) => s.suburb),
-        reasoning: top3
-          .map((s) => `${s.suburb} (median $${s.medianPrice.toLocaleString()}, ${s.annualGrowthPercent}% annual growth, yield ${s.grossRentalYield ?? "N/A"}%): ${s.keyDrivers.join(". ")}${s.notes ? " " + s.notes : ""}`)
-          .join("\n\n"),
-        picks: [],
-        handbookProfiles: top3,
-      };
-    }
-    return {
-      suburbs: ["Bundaberg", "Caboolture", "Ipswich"],
-      reasoning: "These suburbs offer strong investment fundamentals within your budget.",
-      picks: [],
-      handbookProfiles: [],
-    };
-  }
-
-  // Sort intelligence picks by goal
-  const sorted = [...picks].sort((a, b) => {
-    if (primaryGoal.toLowerCase().includes("yield")) return b.yieldScore - a.yieldScore;
-    if (primaryGoal.toLowerCase().includes("growth")) return b.growthScore - a.growthScore;
-    return b.yieldScore + b.growthScore - (a.yieldScore + a.growthScore);
-  });
-
-  const top3 = sorted.slice(0, 3);
-
-  // Get recent research insights — try KV persistent store first, fall back to in-memory cache
+  // Source 3: Live research from knowledge store + in-memory cache
   const kvStateInsights = await KnowledgeStore.getStateInsights(state);
-  const kvSentiment = await KnowledgeStore.getLatestSentiment();
+  const kvUrgent = await KnowledgeStore.getUrgentInsights();
   const kvInfraAlerts = await KnowledgeStore.getInfrastructureAlerts(state);
+  const kvSentiment = await KnowledgeStore.getLatestSentiment();
 
-  // Fall back to in-memory cache if KV is empty
   const cacheInsights = getInsightsForState(state);
   const cacheSentiment = getLatestSentiment();
 
-  const stateInsights = kvStateInsights.length > 0 ? kvStateInsights.map(i => ({
-    title: (i.title as string) || '',
-    summary: (i.summary as string) || '',
-    suburb: i.suburb as string | undefined,
-    state: i.state as string | undefined,
-    urgency: (i.urgency as string) || 'medium',
-    impact: (i.impact as string) || 'neutral',
-    category: (i.category as string) || 'general',
-    source: (i.source as string) || '',
-    relevanceScore: (i.relevanceScore as number) || 5,
-    classifiedAt: (i.classifiedAt as string) || '',
-    timeframe: (i.timeframe as string) || '12months',
-    confidence: (i.confidence as string) || 'reported',
-  })) : cacheInsights;
-  const sentiment = kvSentiment ? {
-    overallSentiment: (kvSentiment.overallSentiment as string) || 'neutral',
-    sentimentScore: (kvSentiment.sentimentScore as number) || 0,
-    interestRateOutlook: (kvSentiment.interestRateOutlook as string) || 'stable',
-    housingSupplyOutlook: (kvSentiment.housingSupplyOutlook as string) || 'stable',
-    demandOutlook: (kvSentiment.demandOutlook as string) || 'moderate',
-    keyThemes: (kvSentiment.keyThemes as string[]) || [],
-    policyRisks: (kvSentiment.policyRisks as string[]) || [],
-    opportunities: (kvSentiment.opportunities as string[]) || [],
-  } : cacheSentiment;
+  const stateInsights = kvStateInsights.length > 0
+    ? kvStateInsights.map((i) => `${i.title ?? ""}: ${i.summary ?? ""}`.slice(0, 150))
+    : cacheInsights.map((i) => `${i.title}: ${i.summary}`.slice(0, 150));
 
-  // Enrich reasoning with handbook data and live research
-  const reasoning = top3
-    .map((p) => {
-      const handbookMatch = handbookSuburbs.find(
-        (h) => h.suburb.toLowerCase() === p.suburb.toLowerCase()
-      );
-      let text = `${p.suburb} (median $${p.medianHousePrice.toLocaleString()}, yield ${p.grossYield}%): ${p.rationale}`;
-      if (handbookMatch) {
-        text += ` Research data: ${handbookMatch.annualGrowthPercent}% annual growth, vacancy ${handbookMatch.vacancyRate ?? "N/A"}%, ${handbookMatch.daysOnMarket ? handbookMatch.daysOnMarket + " days on market" : ""}. Key drivers: ${handbookMatch.keyDrivers.join(", ")}.`;
-      }
-      // Add any recent research insights for this suburb
-      const suburbInsights = stateInsights.filter(
-        (i) => i.suburb?.toLowerCase() === p.suburb.toLowerCase()
-      );
-      if (suburbInsights.length > 0) {
-        text += ` Recent intelligence: ${suburbInsights.map((i) => i.title).join("; ")}.`;
-      }
-      return text;
-    })
-    .join("\n\n");
+  const urgentSignals = (kvUrgent ?? []).map((i) => `[${i.urgency ?? "medium"}] ${i.title ?? ""}: ${i.summary ?? ""}`.slice(0, 150));
 
-  // Append infrastructure alerts from KV
-  const infraContext = kvInfraAlerts.length > 0
-    ? `\n\nInfrastructure alerts for ${state}: ${kvInfraAlerts.slice(0, 3).map(a => `${a.project || 'Project'} in ${a.location || 'TBD'}: ${a.impact || 'TBD'}`).join('; ')}.`
-    : '';
+  const infraAlerts = (kvInfraAlerts ?? []).map((a) => `${a.project ?? "Project"} in ${a.location ?? "TBD"}: ${a.impact ?? "TBD"}`.slice(0, 120));
 
-  // Append market sentiment if available
-  const fullReasoning = sentiment
-    ? `${reasoning}${infraContext}\n\nMarket sentiment: ${sentiment.overallSentiment} (score: ${sentiment.sentimentScore}). Interest rate outlook: ${sentiment.interestRateOutlook}. Supply outlook: ${sentiment.housingSupplyOutlook}. Demand: ${sentiment.demandOutlook}.`
-    : `${reasoning}${infraContext}`;
+  const sentiment = kvSentiment
+    ? { overall: kvSentiment.overallSentiment as string, rates: kvSentiment.interestRateOutlook as string, supply: kvSentiment.housingSupplyOutlook as string, demand: kvSentiment.demandOutlook as string }
+    : cacheSentiment
+      ? { overall: cacheSentiment.overallSentiment, rates: cacheSentiment.interestRateOutlook, supply: cacheSentiment.housingSupplyOutlook, demand: cacheSentiment.demandOutlook }
+      : null;
 
-  if (stateInsights.length > 0) {
-    console.log(`[suburb-selector] Enriched with ${stateInsights.length} research insights for ${state}`);
+  // Build candidate list from all sources (deduplicated)
+  const candidateMap = new Map<string, string>();
+  for (const p of picks) {
+    candidateMap.set(p.suburb, `median $${p.medianHousePrice.toLocaleString()}, yield ${p.grossYield}%, vacancy ${p.vacancyRate}% — ${p.rationale}`);
+  }
+  for (const h of handbookSuburbs) {
+    if (!candidateMap.has(h.suburb)) {
+      candidateMap.set(h.suburb, `median $${h.medianPrice.toLocaleString()}, growth ${h.annualGrowthPercent}%, yield ${h.grossRentalYield ?? "N/A"}% — ${h.keyDrivers.join(", ")}`);
+    }
+  }
+  for (const h of topByMetric) {
+    if (!candidateMap.has(h.suburb)) {
+      candidateMap.set(h.suburb, `median $${h.medianPrice.toLocaleString()}, growth ${h.annualGrowthPercent}%, yield ${h.grossRentalYield ?? "N/A"}%`);
+    }
   }
 
-  // Collect matching handbook profiles for the selected suburbs
-  const matchedProfiles = top3
-    .map((p) =>
-      handbookSuburbs.find((h) => h.suburb.toLowerCase() === p.suburb.toLowerCase()) ||
-      topByMetric.find((h) => h.suburb.toLowerCase() === p.suburb.toLowerCase())
-    )
-    .filter((p): p is SuburbProfile => p !== undefined);
+  const candidateList = Array.from(candidateMap.entries())
+    .map(([suburb, desc]) => `- ${suburb}: ${desc}`)
+    .join("\n");
 
-  console.log(
-    `[suburb-selector] Selected ${top3.map((p) => p.suburb).join(", ")} in ${state} for budget $${maxBudget.toLocaleString()}`
-  );
+  console.log(`[suburb-selector] Candidates: ${candidateMap.size} suburbs`);
+  console.log(`[suburb-selector] State insights: ${stateInsights.length}`);
+  console.log(`[suburb-selector] Urgent signals: ${urgentSignals.length}`);
+  console.log(`[suburb-selector] Infra alerts: ${infraAlerts.length}`);
+  console.log(`[suburb-selector] Sentiment: ${sentiment?.overall ?? "unknown"}`);
 
-  return {
-    suburbs: top3.map((p) => p.suburb),
-    reasoning: fullReasoning,
-    picks: top3,
-    handbookProfiles: matchedProfiles,
-  };
+  // ── Ask Claude to select the best 3 based on all context ──
+
+  const userContent = `Today's date: ${new Date().toISOString().split("T")[0]}
+
+CURRENT MARKET INTELLIGENCE for ${state}:
+${stateInsights.length > 0 ? stateInsights.join("\n") : "No recent intelligence available — use your knowledge of current Australian market conditions."}
+
+${urgentSignals.length > 0 ? `URGENT SIGNALS:\n${urgentSignals.join("\n")}` : ""}
+
+${infraAlerts.length > 0 ? `INFRASTRUCTURE ALERTS:\n${infraAlerts.join("\n")}` : ""}
+
+MARKET SENTIMENT: ${sentiment ? `${sentiment.overall}. Interest rates: ${sentiment.rates}. Supply: ${sentiment.supply}. Demand: ${sentiment.demand}.` : "Neutral — stable conditions."}
+
+CANDIDATE SUBURBS for ${state} at budget $${maxBudget.toLocaleString()}:
+${candidateList}
+
+CLIENT REQUIREMENTS:
+- Maximum budget: $${maxBudget.toLocaleString()}
+- Purpose: ${purpose}
+- Property type: ${propertyType}
+- Minimum bedrooms: ${bedrooms}+
+- Primary goal: ${primaryGoal}
+- Minimum yield target: ${yieldTarget}%
+
+Based on ALL of the above — today's intelligence AND the client's specific requirements — select the 3 BEST suburbs from the candidate list.
+
+Important: Vary your recommendations based on the client profile.
+For yield-focused investors prioritise regional centres with high rental demand.
+For growth-focused investors prioritise infrastructure corridors and gentrifying areas.
+For balanced investors prioritise established middle-ring suburbs with both income and growth.
+Do not always recommend the same suburbs — the selection must reflect this client's unique needs.
+
+Return ONLY a JSON object with exactly two keys:
+{"suburbs": ["Suburb1", "Suburb2", "Suburb3"], "reasoning": "2-3 sentences explaining why these suburbs were chosen for THIS client based on current conditions."}`;
+
+  const systemPrompt =
+    "You are an expert Australian property investment analyst selecting suburbs for a client. " +
+    "Return ONLY a valid JSON object with 'suburbs' (array of 3 strings) and 'reasoning' (string). " +
+    "No markdown, no explanation outside the JSON.";
+
+  try {
+    const response = await askClaude(systemPrompt, userContent);
+    const parsed = JSON.parse(response) as { suburbs: string[]; reasoning: string };
+
+    const selectedSuburbs = parsed.suburbs.slice(0, 3);
+    const reasoning = parsed.reasoning;
+
+    console.log(`[suburb-selector] Claude selected: ${selectedSuburbs.join(", ")}`);
+    console.log(`[suburb-selector] Reasoning: ${reasoning.slice(0, 200)}`);
+
+    // Match selected suburbs back to our intelligence data for enrichment
+    const selectedPicks = selectedSuburbs
+      .map((s) => picks.find((p) => p.suburb.toLowerCase() === s.toLowerCase()))
+      .filter((p): p is SuburbPick => p !== undefined);
+
+    const selectedProfiles = selectedSuburbs
+      .map((s) =>
+        handbookSuburbs.find((h) => h.suburb.toLowerCase() === s.toLowerCase()) ||
+        topByMetric.find((h) => h.suburb.toLowerCase() === s.toLowerCase())
+      )
+      .filter((p): p is SuburbProfile => p !== undefined);
+
+    return {
+      suburbs: selectedSuburbs,
+      reasoning,
+      picks: selectedPicks,
+      handbookProfiles: selectedProfiles,
+    };
+  } catch (error) {
+    // Claude call failed — fall back to deterministic selection with variety
+    console.error("[suburb-selector] Claude failed, using fallback:", error instanceof Error ? error.message : String(error));
+
+    const goal = primaryGoal.toLowerCase();
+    const sorted = [...picks].sort((a, b) => {
+      if (goal.includes("yield")) return b.yieldScore - a.yieldScore;
+      if (goal.includes("growth")) return b.growthScore - a.growthScore;
+      return (b.yieldScore + b.growthScore) - (a.yieldScore + a.growthScore);
+    });
+
+    const top3 = sorted.slice(0, 3);
+    const fallbackReasoning = top3
+      .map((p) => `${p.suburb} (median $${p.medianHousePrice.toLocaleString()}, yield ${p.grossYield}%): ${p.rationale}`)
+      .join(" ");
+
+    return {
+      suburbs: top3.map((p) => p.suburb),
+      reasoning: fallbackReasoning,
+      picks: top3,
+      handbookProfiles: [],
+    };
+  }
 }
