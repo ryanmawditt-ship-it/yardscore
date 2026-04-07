@@ -385,7 +385,10 @@ export default function ReportPage() {
     );
   }
 
-  if (!report) {
+  // Build the list of properties to render
+  const allProperties: FinalReport[] = multiReport?.properties ?? (report ? [report] : []);
+
+  if (!report && allProperties.length === 0) {
     return (
       <div
         style={{
@@ -428,9 +431,14 @@ export default function ReportPage() {
     );
   }
 
-  const property = report.property ?? { address: "", suburb: "", state: "", postcode: "", lat: 0, lng: 0 };
+  // Use first property for header/date but render all below
+  const firstReport = allProperties[0] ?? report;
+  if (!firstReport) return null;
 
-  const safeAnalysis = report.analysis as unknown as Record<string, unknown> | undefined;
+  const property = firstReport.property ?? { address: "", suburb: "", state: "", postcode: "", lat: 0, lng: 0 };
+
+  const activeReport = report ?? firstReport;
+  const safeAnalysis = activeReport.analysis as unknown as Record<string, unknown> | undefined;
   const analysis = {
     address: (safeAnalysis?.address as string) ?? "",
     lastSalePrice: (safeAnalysis?.lastSalePrice as number | null) ?? null,
@@ -445,7 +453,7 @@ export default function ReportPage() {
     trendSummary: (safeAnalysis?.trendSummary as string) ?? "",
   };
 
-  const safeRisk = report.risk as unknown as Record<string, unknown> | undefined;
+  const safeRisk = activeReport.risk as unknown as Record<string, unknown> | undefined;
   const risk = {
     floodRisk: (safeRisk?.floodRisk as string) ?? "none",
     bushfireRisk: (safeRisk?.bushfireRisk as string) ?? "none",
@@ -458,7 +466,7 @@ export default function ReportPage() {
     riskSummary: (safeRisk?.riskSummary as string) ?? "",
   };
 
-  const safeInfra = report.infrastructure as unknown as Record<string, unknown> | undefined;
+  const safeInfra = activeReport.infrastructure as unknown as Record<string, unknown> | undefined;
   const infrastructure = {
     projects: (safeInfra?.projects as { name: string; type: string; status: string; distanceKm: number; completionYear: number | null }[]) ?? [],
     supplyDemandSignal: (safeInfra?.supplyDemandSignal as string) ?? "balanced",
@@ -467,7 +475,7 @@ export default function ReportPage() {
     opportunitySummary: (safeInfra?.opportunitySummary as string) ?? "",
   };
 
-  const safeYield = report.yield as unknown as Record<string, unknown> | undefined;
+  const safeYield = activeReport.yield as unknown as Record<string, unknown> | undefined;
   const yieldData = {
     estimatedWeeklyRent: (safeYield?.estimatedWeeklyRent as number | null) ?? null,
     grossYieldPct: (safeYield?.grossYieldPct as number | null) ?? null,
@@ -477,7 +485,7 @@ export default function ReportPage() {
     rentalDemandSummary: (safeYield?.rentalDemandSummary as string) ?? "",
   };
 
-  const safeVal = report.valuation as unknown as Record<string, unknown> | undefined;
+  const safeVal = activeReport.valuation as unknown as Record<string, unknown> | undefined;
   const valuation = {
     fairValueLow: (safeVal?.fairValueLow as number) ?? 0,
     fairValueMid: (safeVal?.fairValueMid as number) ?? 0,
@@ -489,9 +497,9 @@ export default function ReportPage() {
     investmentThesis: (safeVal?.investmentThesis as string) ?? "",
   };
 
-  const overallScore = report.overallScore ?? 0;
-  const executiveSummary = report.executiveSummary ?? "";
-  const generatedAt = report.generatedAt ?? "";
+  const overallScore = activeReport.overallScore ?? 0;
+  const executiveSummary = activeReport.executiveSummary ?? "";
+  const generatedAt = activeReport.generatedAt ?? "";
 
   const reportDate = generatedAt
     ? new Date(generatedAt).toLocaleDateString("en-AU", {
@@ -672,8 +680,56 @@ export default function ReportPage() {
           </div>
         )}
 
+        {/* ── ADDITIONAL PROPERTIES (compact cards for #2, #3, etc.) ── */}
+        {allProperties.length > 1 && (
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ fontSize: 12, fontWeight: 700, color: "#0071e3", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12, ...sf }}>
+              {allProperties.length} properties recommended
+            </p>
+            {allProperties.map((pr, idx) => {
+              const pp = pr.property ?? { address: "", suburb: "", state: "", postcode: "" };
+              const pv = pr.valuation as unknown as Record<string, unknown> | undefined;
+              const py = pr.yield as unknown as Record<string, unknown> | undefined;
+              const signal = String(pv?.signal ?? "hold").toLowerCase();
+              const scoreColor = pr.overallScore >= 7 ? "#16a34a" : pr.overallScore >= 5 ? "#d97706" : "#dc2626";
+              return (
+                <div
+                  key={idx}
+                  onClick={() => {
+                    // When clicking a card, swap the main report
+                    setReport(pr);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    backgroundColor: pr === report ? "#eff6ff" : "#fff",
+                    border: pr === report ? "2px solid #0071e3" : "1px solid #e5e7eb",
+                    borderRadius: 14, padding: "16px 20px", marginBottom: 8, cursor: "pointer",
+                    transition: "all 0.15s", ...sf,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 14, flex: 1, minWidth: 0 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: "50%", backgroundColor: scoreColor, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+                      {pr.overallScore}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ fontSize: 14, fontWeight: 600, color: "#1d1d1f", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        #{idx + 1} {pp.address?.split(",")[0] || "Property"}
+                      </p>
+                      <p style={{ fontSize: 12, color: "#86868b", margin: 0 }}>{pp.suburb} · Yield {Number(py?.grossYieldPct ?? 0).toFixed(1)}% · {signal.toUpperCase()}</p>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 980, backgroundColor: signal === "buy" ? "#dcfce7" : signal === "avoid" ? "#fef2f2" : "#fef9c3", color: signal === "buy" ? "#16a34a" : signal === "avoid" ? "#dc2626" : "#a16207" }}>
+                    {signal.toUpperCase()}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* ── WHY THIS PROPERTY ── */}
-        {report.pipelineMeta && (
+        {activeReport.pipelineMeta && (
           <div
             style={{
               backgroundColor: "#fff",
@@ -693,19 +749,19 @@ export default function ReportPage() {
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               <span style={{ fontSize: 12, backgroundColor: "#f0fdf4", color: "#16a34a", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
-                Passed {report.pipelineMeta.checksRun.length} of {report.pipelineMeta.checksRun.length} quality checks
+                Passed {activeReport.pipelineMeta.checksRun.length} of {activeReport.pipelineMeta.checksRun.length} quality checks
               </span>
               <span style={{ fontSize: 12, backgroundColor: "#eff6ff", color: "#2563eb", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
-                Ranked #{report.pipelineMeta.rankPosition} of {report.pipelineMeta.candidatesPassed} candidates
+                Ranked #{activeReport.pipelineMeta.rankPosition} of {activeReport.pipelineMeta.candidatesPassed} candidates
               </span>
               <span style={{ fontSize: 12, backgroundColor: "#f5f3ff", color: "#7c3aed", padding: "4px 12px", borderRadius: 980, fontWeight: 600 }}>
-                Client score: {report.pipelineMeta.clientScore}/10
+                Client score: {activeReport.pipelineMeta.clientScore}/10
               </span>
             </div>
             <p style={{ fontSize: 13, color: "#64748b", margin: 0, lineHeight: 1.6 }}>
-              Selected from {report.pipelineMeta.candidatesFound} initial candidates.
-              {" "}{report.pipelineMeta.candidatesPassed} passed all hard filters (budget, bedrooms, flood, bushfire, zoning).
-              {" "}Ranked by {report.pipelineMeta.clientGoal.toLowerCase()}.
+              Selected from {activeReport.pipelineMeta.candidatesFound} initial candidates.
+              {" "}{activeReport.pipelineMeta.candidatesPassed} passed all hard filters (budget, bedrooms, flood, bushfire, zoning).
+              {" "}Ranked by {activeReport.pipelineMeta.clientGoal.toLowerCase()}.
             </p>
           </div>
         )}
@@ -721,9 +777,9 @@ export default function ReportPage() {
           }}
         >
           {/* Suburb photo */}
-          {report.suburbPhotoUrl && (
+          {activeReport.suburbPhotoUrl && (
             <img
-              src={report.suburbPhotoUrl}
+              src={activeReport.suburbPhotoUrl}
               alt={property.suburb}
               style={{ width: "100%", height: 200, objectFit: "cover", display: "block" }}
             />
@@ -1468,10 +1524,10 @@ export default function ReportPage() {
         </div>
 
         {/* Listing search link */}
-        {report.listingSearchUrl && (
+        {activeReport.listingSearchUrl && (
           <div style={{ marginBottom: 16 }}>
             <a
-              href={report.listingSearchUrl}
+              href={activeReport.listingSearchUrl}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -1488,11 +1544,11 @@ export default function ReportPage() {
                 letterSpacing: "-0.01em",
               }}
             >
-              {report.listingSearchUrl?.includes("homely.com.au")
+              {activeReport.listingSearchUrl?.includes("homely.com.au")
                 ? `View on Homely.com.au — ${property.suburb} →`
-                : report.listingSearchUrl?.includes("view.com.au")
+                : activeReport.listingSearchUrl?.includes("view.com.au")
                 ? `View on View.com.au — ${property.suburb} →`
-                : report.listingSearchUrl?.includes("domain.com.au")
+                : activeReport.listingSearchUrl?.includes("domain.com.au")
                 ? `View on Domain.com.au — ${property.suburb} →`
                 : `Search current listings in ${property.suburb} →`}
             </a>

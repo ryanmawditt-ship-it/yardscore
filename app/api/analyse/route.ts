@@ -220,11 +220,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "No properties matched your criteria after quality checks. Try adjusting your budget or bedroom requirements." }, { status: 200 });
       }
 
-      // ── PHASE 3: Deep analysis ──
-      console.log(`\n[pipeline] Phase 3: Running deep analysis on ${candidates.length} candidates...`);
+      // ── PHASE 3: Deep analysis (cap at 9 to control cost/time) ──
+      const toAnalyse = candidates.slice(0, 9);
+      console.log(`\n[pipeline] Phase 3: Running deep analysis on ${toAnalyse.length} candidates...`);
 
       const analysisResults = await Promise.allSettled(
-        candidates.map((c) => deepAnalyse(c.property))
+        toAnalyse.map((c) => deepAnalyse(c.property))
       );
 
       const reports: FinalReport[] = [];
@@ -233,7 +234,7 @@ export async function POST(request: NextRequest) {
         if (r.status === "fulfilled" && r.value) {
           reports.push(r.value);
         } else {
-          console.log(`[pipeline] Deep analysis failed for ${candidates[i].address}`);
+          console.log(`[pipeline] Deep analysis failed for ${toAnalyse[i].address}`);
         }
       }
 
@@ -252,12 +253,11 @@ export async function POST(request: NextRequest) {
         console.log(`[pipeline]   ${r.property.suburb}: ${r.property.address.split(",")[0]} — overall ${r.overallScore}/10, client score ${(clientScore * 10).toFixed(1)}/10`);
       }
 
-      // ── PHASE 5: Final selection ──
-      console.log(`\n[pipeline] Phase 5: Selecting top properties (min threshold 5.0)...`);
+      // ── PHASE 5: Final selection — guarantee 3 minimum ──
+      console.log(`\n[pipeline] Phase 5: Selecting top properties (target 3-5)...`);
 
-      const MIN_SCORE = 0.5; // 5.0/10 expressed as 0-1
-      const qualified = scored.filter((s) => s.clientScore >= MIN_SCORE);
-      const selected = (qualified.length >= 3 ? qualified : scored).slice(0, 5);
+      // Take top 3-5 regardless of score — the client paid for a report
+      const selected = scored.slice(0, Math.max(3, Math.min(5, scored.length)));
 
       console.log(`[pipeline] Phase 5 complete: ${selected.length} properties selected (${elapsed()})`);
 

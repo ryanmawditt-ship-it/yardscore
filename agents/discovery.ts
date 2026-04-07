@@ -129,7 +129,7 @@ export async function discoverProperties(
   const realListings = await getRealListings(suburb, state, maxBudget, bedrooms, propertyType);
   if (realListings.length > 0) {
     console.log(`[discovery] Got ${realListings.length} REAL listings from scrapers for ${suburb}`);
-    const selected = realListings.slice(0, 2);
+    const selected = realListings.slice(0, 3);
     for (const l of selected) {
       listingMetaCache.set(l.address, {
         listingUrl: l.listingUrl,
@@ -181,7 +181,7 @@ export async function discoverProperties(
   const fallbackAddresses = FALLBACK_ADDRESSES[key];
   if (fallbackAddresses) {
     console.log(`[discovery] Using ${fallbackAddresses.length} hardcoded fallback addresses for ${suburb}`);
-    const selected = fallbackAddresses.slice(0, 2);
+    const selected = fallbackAddresses.slice(0, 3);
     const searchUrl = `https://www.homely.com.au/buy/${suburbSlug}-${stateName}/pg-1?maxprice=${maxBudget}&minbeds=${bedrooms}`;
     for (const addr of selected) {
       listingMetaCache.set(addr, {
@@ -201,7 +201,7 @@ export async function discoverProperties(
   console.log(`[discovery] All sources exhausted for ${suburb}, generating AI addresses`);
   const response = await askClaude(
     "You are an Australian real estate data assistant. Return ONLY a valid JSON array of address strings.",
-    `Generate 2 realistic residential property addresses for sale in ${suburb}, ${state} with asking price under $${maxBudget.toLocaleString()}. Properties must be ${bedrooms}+ bedroom ${propertyType.toLowerCase()}s. Use real street names. Include correct postcode. Return JSON array only.`
+    `Generate 3 realistic residential property addresses for sale in ${suburb}, ${state} with asking price under $${maxBudget.toLocaleString()}. Properties must be ${bedrooms}+ bedroom ${propertyType.toLowerCase()}s. Use real street names. Include correct postcode. Return JSON array only.`
   );
   const addresses = JSON.parse(response) as string[];
   const searchUrl = `https://www.homely.com.au/buy/${suburbSlug}-${stateName}/pg-1?maxprice=${maxBudget}&minbeds=${bedrooms}`;
@@ -216,5 +216,5 @@ export async function discoverProperties(
       source: "ai-generated",
     });
   }
-  return addresses.slice(0, 2);
+  return addresses.slice(0, 3);
 }
