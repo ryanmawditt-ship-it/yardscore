@@ -10,6 +10,7 @@ import {
 import { getInsightsForState, getLatestSentiment } from "@/lib/research-cache";
 import { KnowledgeStore } from "@/lib/knowledge-store";
 import { askClaude } from "@/lib/claude";
+import { findAffordableSuburbs } from "@/lib/suburb-prices";
 
 export interface SuburbSelection {
   suburbs: string[];
@@ -75,10 +76,23 @@ export async function selectBestSuburbs(
       ? { overall: cacheSentiment.overallSentiment, rates: cacheSentiment.interestRateOutlook, supply: cacheSentiment.housingSupplyOutlook, demand: cacheSentiment.demandOutlook }
       : null;
 
+  // Source 4: Verified AllHomes market prices — suburbs with real listings in budget
+  const verifiedAffordable = findAffordableSuburbs(state, maxBudget, 2);
+  console.log(`[suburb-selector] Verified affordable suburbs in ${state} under $${maxBudget.toLocaleString()}: ${verifiedAffordable.length}`);
+
   // Build candidate list from all sources (deduplicated)
   const candidateMap = new Map<string, string>();
+
+  // Add verified affordable suburbs first — these are the most reliable
+  for (const v of verifiedAffordable) {
+    candidateMap.set(v.suburb, `VERIFIED median $${v.median?.toLocaleString()}, range $${v.cheapest?.toLocaleString()}-$${v.mostExpensive?.toLocaleString()}, ${v.pricedListings} priced listings of ${v.totalListings} total`);
+  }
+
+  // Add intelligence picks (may override with richer descriptions)
   for (const p of picks) {
-    candidateMap.set(p.suburb, `median $${p.medianHousePrice.toLocaleString()}, yield ${p.grossYield}%, vacancy ${p.vacancyRate}% — ${p.rationale}`);
+    if (!candidateMap.has(p.suburb)) {
+      candidateMap.set(p.suburb, `median $${p.medianHousePrice.toLocaleString()}, yield ${p.grossYield}%, vacancy ${p.vacancyRate}% — ${p.rationale}`);
+    }
   }
   for (const h of handbookSuburbs) {
     if (!candidateMap.has(h.suburb)) {
@@ -95,7 +109,7 @@ export async function selectBestSuburbs(
     .map(([suburb, desc]) => `- ${suburb}: ${desc}`)
     .join("\n");
 
-  console.log(`[suburb-selector] Candidates: ${candidateMap.size} suburbs`);
+  console.log(`[suburb-selector] Total candidates: ${candidateMap.size} suburbs (${verifiedAffordable.length} verified affordable)`);
   console.log(`[suburb-selector] State insights: ${stateInsights.length}`);
   console.log(`[suburb-selector] Urgent signals: ${urgentSignals.length}`);
   console.log(`[suburb-selector] Infra alerts: ${infraAlerts.length}`);
