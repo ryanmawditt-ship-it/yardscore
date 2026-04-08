@@ -12,6 +12,7 @@ import { classifyAndRank, type ClassifiedInsight } from '@/lib/intelligence-clas
 import { monitorCouncilDAs, type DAInsight } from '@/lib/council-da-monitor'
 import { analyzeNewsSentiment, type SentimentResult } from '@/lib/news-sentiment-analyzer'
 import { KnowledgeStore } from '@/lib/knowledge-store'
+import { scoreArticle } from '@/lib/sentiment-lexicon'
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -252,11 +253,18 @@ async function extractIntelligence(items: FeedItem[]): Promise<Array<{
     console.log(`[research] Processing batch ${batchNum} of ${totalBatches} (${batch.length} articles)`)
 
     try {
-      const articlesText = batch.map((item, idx) =>
-        `[${idx + 1}] ${item.title}\n${item.description}\nSource: ${item.source}`
-      ).join('\n\n')
+      // Pre-score each article with the sentiment lexicon
+      const articlesText = batch.map((item, idx) => {
+        const articleText = `${item.title} ${item.description}`
+        const lexiconScore = scoreArticle(articleText)
+        const signals = lexiconScore.topSignals.length > 0
+          ? `\nPre-scored: ${lexiconScore.sentiment} (${lexiconScore.normalisedScore}/10). Signals: ${lexiconScore.topSignals.join(', ')}`
+          : ''
+        return `[${idx + 1}] ${item.title}\n${item.description}\nSource: ${item.source}${signals}`
+      }).join('\n\n')
 
       const userContent = `Extract property investment intelligence from these articles.
+Each article has been pre-scored by our sentiment lexicon — use those scores to inform your analysis.
 
 ${EXTRACTION_SIGNALS}
 
@@ -426,21 +434,13 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
   console.log(`[research] Scanned ${daInsights.length} council DA portals`)
   console.log(`[research] Extracted ${rawInsights.length} raw insights from ${Math.min(allItems.length, MAX_ARTICLES)} priority articles`)
 
-  // Step 3: News sentiment analysis
-  console.log('[research] Step 3: Analyzing news sentiment...')
-  const newsArticles = allItems
-    .filter(item =>
-      item.source.includes('news.com.au') ||
-      item.source.includes('abc.net.au') ||
-      item.source.includes('afr.com') ||
-      item.source.includes('smh.com.au') ||
-      item.source.includes('7news') ||
-      item.source.includes('9news') ||
-      item.source.includes('theaustralian')
-    )
-    .map(item => `${item.title}\n${item.description}`)
-  const sentiment = await analyzeNewsSentiment(newsArticles)
-  console.log(`[research] News sentiment: ${sentiment.overallSentiment} (${sentiment.sentimentScore})`)
+  // Step 3: News sentiment analysis (lexicon-powered — scans ALL articles, no API calls)
+  console.log('[research] Step 3: Analyzing news sentiment via lexicon...')
+  const allArticleTexts = allItems.map(item => `${item.title}\n${item.description}`)
+  const sentiment = await analyzeNewsSentiment(allArticleTexts)
+  console.log(`[research] Sentiment: ${sentiment.overallSentiment} (${sentiment.sentimentScore}). ${sentiment.articlesScored} articles scored, avg ${sentiment.avgArticleScore}/10`)
+  console.log(`[research] Top bullish: ${sentiment.bullishSignals.slice(0, 3).join(', ')}`)
+  console.log(`[research] Top bearish: ${sentiment.bearishSignals.slice(0, 3).join(', ')}`)
 
   // Step 4: Classify and rank all insights
   console.log('[research] Step 4: Classifying insights...')

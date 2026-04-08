@@ -1,9 +1,10 @@
 /**
  * YARDSCORE NEWS SENTIMENT ANALYZER
- * Analyzes news sentiment to understand market mood using Claude.
+ * Uses the sentiment lexicon for instant analysis — no API calls needed.
+ * Scans all articles through 500+ property-specific terms.
  */
 
-import { askClaude } from '@/lib/claude'
+import { scoreArticle, getMostFrequent } from '@/lib/sentiment-lexicon'
 
 export interface SentimentResult {
   overallSentiment: 'bullish' | 'bearish' | 'neutral'
@@ -14,51 +15,55 @@ export interface SentimentResult {
   interestRateOutlook: 'rising' | 'falling' | 'stable'
   housingSupplyOutlook: 'improving' | 'worsening' | 'stable'
   demandOutlook: 'strong' | 'moderate' | 'weak'
+  // New: lexicon-powered detail
+  bullishSignals: string[]
+  bearishSignals: string[]
+  infrastructureSignals: string[]
+  rentalSignals: string[]
+  articlesScored: number
+  avgArticleScore: number
 }
 
-const SENTIMENT_SYSTEM_PROMPT =
-  'You are an Australian property market sentiment analyst. ' +
-  'Analyze news articles and return ONLY a valid JSON object with your analysis. ' +
-  'No markdown, no explanation, just the JSON.'
-
 export async function analyzeNewsSentiment(articles: string[]): Promise<SentimentResult> {
-  if (articles.length === 0) {
-    return defaultSentiment()
-  }
+  if (articles.length === 0) return defaultSentiment()
 
-  try {
-    const userContent = `Analyze the sentiment and extract key themes from these Australian property and economic news articles.
+  // Score every article through the lexicon
+  const scores = articles.map(a => scoreArticle(a))
+  const avgScore = scores.reduce((sum, s) => sum + s.normalisedScore, 0) / scores.length
 
-Articles:
-${articles.slice(0, 10).join('\n\n---\n\n')}
+  const allBullish = scores.flatMap(s => s.bullishTermsFound)
+  const allBearish = scores.flatMap(s => s.bearishTermsFound)
+  const allInfra = scores.flatMap(s => s.infrastructureSignals)
+  const allPolicy = scores.flatMap(s => s.policySignals)
+  const allRental = scores.flatMap(s => s.rentalSignals)
 
-Return JSON:
-{
-  "overallSentiment": "bullish|bearish|neutral",
-  "sentimentScore": -100 to 100,
-  "keyThemes": ["theme1", "theme2"],
-  "policyRisks": ["risk1", "risk2"],
-  "opportunities": ["opportunity1", "opportunity2"],
-  "interestRateOutlook": "rising|falling|stable",
-  "housingSupplyOutlook": "improving|worsening|stable",
-  "demandOutlook": "strong|moderate|weak"
-}`
+  const bearishPolicies = allPolicy.filter(p => p.includes('bearish'))
+  const bullishPolicies = allPolicy.filter(p => p.includes('bullish'))
 
-    const text = await askClaude(SENTIMENT_SYSTEM_PROMPT, userContent)
-    const parsed = JSON.parse(text)
-    return {
-      overallSentiment: parsed.overallSentiment || 'neutral',
-      sentimentScore: typeof parsed.sentimentScore === 'number' ? parsed.sentimentScore : 0,
-      keyThemes: Array.isArray(parsed.keyThemes) ? parsed.keyThemes : [],
-      policyRisks: Array.isArray(parsed.policyRisks) ? parsed.policyRisks : [],
-      opportunities: Array.isArray(parsed.opportunities) ? parsed.opportunities : [],
-      interestRateOutlook: parsed.interestRateOutlook || 'stable',
-      housingSupplyOutlook: parsed.housingSupplyOutlook || 'stable',
-      demandOutlook: parsed.demandOutlook || 'moderate',
-    }
-  } catch (e) {
-    console.error('[sentiment] Analysis failed:', e instanceof Error ? e.message : String(e))
-    return defaultSentiment()
+  return {
+    overallSentiment: avgScore >= 6 ? 'bullish' : avgScore <= 4 ? 'bearish' : 'neutral',
+    sentimentScore: Math.round((avgScore - 5) * 20), // maps 0-10 to -100 to +100
+    keyThemes: getMostFrequent([...allBullish, ...allBearish], 5),
+    policyRisks: getMostFrequent(bearishPolicies.map(p => p.replace(' (bearish)', '')), 3),
+    opportunities: getMostFrequent(allBullish, 3),
+    interestRateOutlook: allPolicy.some(p => p.includes('rate cut') || p.includes('rate reduction'))
+      ? 'falling'
+      : allPolicy.some(p => p.includes('rate rise') || p.includes('rate hike') || p.includes('rate increase'))
+        ? 'rising'
+        : 'stable',
+    housingSupplyOutlook: allBullish.some(t => t.includes('shortage') || t.includes('undersupply'))
+      ? 'worsening'
+      : allBearish.some(t => t.includes('oversupply'))
+        ? 'improving'
+        : 'stable',
+    demandOutlook: avgScore >= 6 ? 'strong' : avgScore <= 4 ? 'weak' : 'moderate',
+    // Lexicon details
+    bullishSignals: getMostFrequent(allBullish, 10),
+    bearishSignals: getMostFrequent(allBearish, 10),
+    infrastructureSignals: getMostFrequent(allInfra.map(s => s.replace(/ \(\+\d+\)/, '')), 5),
+    rentalSignals: getMostFrequent(allRental.map(s => s.replace(/ \((bullish|bearish)\)/, '')), 5),
+    articlesScored: scores.length,
+    avgArticleScore: Math.round(avgScore * 10) / 10,
   }
 }
 
@@ -72,5 +77,11 @@ function defaultSentiment(): SentimentResult {
     interestRateOutlook: 'stable',
     housingSupplyOutlook: 'stable',
     demandOutlook: 'moderate',
+    bullishSignals: [],
+    bearishSignals: [],
+    infrastructureSignals: [],
+    rentalSignals: [],
+    articlesScored: 0,
+    avgArticleScore: 5,
   }
 }

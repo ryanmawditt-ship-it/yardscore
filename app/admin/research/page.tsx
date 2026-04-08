@@ -14,6 +14,8 @@ interface DAInsight { council: string; state: string; applications: string[]; sc
 interface Sentiment {
   overallSentiment: string; sentimentScore: number; keyThemes: string[]; policyRisks: string[]
   opportunities: string[]; interestRateOutlook: string; housingSupplyOutlook: string; demandOutlook: string
+  bullishSignals?: string[]; bearishSignals?: string[]; infrastructureSignals?: string[]; rentalSignals?: string[]
+  articlesScored?: number; avgArticleScore?: number
 }
 interface KVStats { totalInsights: number; urgentInsights: number; infraAlerts: number; sentimentHistory: number; kvConfigured: boolean }
 interface RunStats { articlesFound: number; insightsExtracted: number; feedsScanned: number; runAt: string }
@@ -478,7 +480,12 @@ export default function ResearchDashboard() {
         {/* Sentiment */}
         {activeSentiment && (
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Market Sentiment</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-900">Market Sentiment</h2>
+              {activeSentiment.articlesScored && (
+                <span className="text-xs text-gray-400">{activeSentiment.articlesScored} articles scored, avg {activeSentiment.avgArticleScore}/10</span>
+              )}
+            </div>
             <div className="grid md:grid-cols-2 gap-6">
               <div>
                 <SentimentGauge score={activeSentiment.sentimentScore} label="Overall Sentiment" />
@@ -494,6 +501,55 @@ export default function ResearchDashboard() {
                 {activeSentiment.opportunities?.length > 0 && (<div><p className="text-sm font-medium text-gray-700 mb-2">Opportunities</p><ul className="text-sm text-green-600 space-y-1">{activeSentiment.opportunities.map((o, i) => <li key={i}>• {o}</li>)}</ul></div>)}
               </div>
             </div>
+
+            {/* Lexicon Signal Breakdown */}
+            {(activeSentiment.bullishSignals?.length || activeSentiment.bearishSignals?.length || activeSentiment.infrastructureSignals?.length) && (
+              <div className="mt-6 pt-5 border-t border-gray-100">
+                <h3 className="text-sm font-bold text-gray-900 mb-3">Signal Breakdown (from 500+ property terms)</h3>
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {activeSentiment.bullishSignals && activeSentiment.bullishSignals.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-green-700 mb-2">Bullish Signals ({activeSentiment.bullishSignals.length})</p>
+                      <div className="flex flex-wrap gap-1">
+                        {activeSentiment.bullishSignals.map((s, i) => (
+                          <span key={i} className="bg-green-50 text-green-700 px-2 py-0.5 rounded text-xs">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {activeSentiment.bearishSignals && activeSentiment.bearishSignals.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-red-700 mb-2">Bearish Signals ({activeSentiment.bearishSignals.length})</p>
+                      <div className="flex flex-wrap gap-1">
+                        {activeSentiment.bearishSignals.map((s, i) => (
+                          <span key={i} className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {activeSentiment.infrastructureSignals && activeSentiment.infrastructureSignals.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-purple-700 mb-2">Infrastructure ({activeSentiment.infrastructureSignals.length})</p>
+                      <div className="flex flex-wrap gap-1">
+                        {activeSentiment.infrastructureSignals.map((s, i) => (
+                          <span key={i} className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-xs">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {activeSentiment.rentalSignals && activeSentiment.rentalSignals.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-blue-700 mb-2">Rental Signals ({activeSentiment.rentalSignals.length})</p>
+                      <div className="flex flex-wrap gap-1">
+                        {activeSentiment.rentalSignals.map((s, i) => (
+                          <span key={i} className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs">{s}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
