@@ -12,10 +12,14 @@ export interface AllHomesListing {
   bathrooms: number | null;
   parking: number | null;
   landSize: string | null;
+  landSizeM2: number | null;
   propertyType: string;
   listingUrl: string;
   photoUrl: string | null;
   listingId: string | null;
+  priceEstimated: boolean;
+  priceConfidence: "confirmed" | "high" | "medium" | "low";
+  priceBasis: string;
 }
 
 const HEADERS = {
@@ -174,16 +178,7 @@ function extractListingsFromText(
       continue;
     }
 
-    // Skip listings with no price — we cannot analyse without a price
-    if (!price) {
-      const hasPrice = priceDisplay.includes("$");
-      if (!hasPrice) {
-        console.log(`[allhomes] Skipping no-price listing: ${address} (${priceDisplay})`);
-        continue;
-      }
-    }
-
-    // Budget filter: eliminate if price exceeds budget + 5%
+    // Budget filter: eliminate if confirmed price exceeds budget + 5%
     if (price && price > maxBudget * 1.05) {
       console.log(`[allhomes] Skipping over-budget: ${address} ($${price.toLocaleString()} > $${maxBudget.toLocaleString()})`);
       continue;
@@ -203,10 +198,14 @@ function extractListingsFromText(
       bathrooms: baths,
       parking: parks,
       landSize: null,
+      landSizeM2: null,
       propertyType: propType || propertyType,
       listingUrl: `https://www.allhomes.com.au/sale/${suburbSlug}-${state.toLowerCase()}-${postcode}/`,
       photoUrl: null,
       listingId: null,
+      priceEstimated: false,
+      priceConfidence: price ? "confirmed" : "low",
+      priceBasis: price ? "Listed price from AllHomes" : "No price listed",
     });
   }
 
@@ -289,7 +288,41 @@ export async function scrapeAllHomesListings(
 
       if (listings.length > 0) {
         console.log(`[allhomes] Extracted ${listings.length} listings from ${url}`);
-        return listings.slice(0, 8);
+
+        // Enrich no-price listings by fetching their detail pages
+        const noPrice = listings.filter((l) => !l.price && l.listingUrl.includes("allhomes.com.au/"));
+        if (noPrice.length > 0) {
+          console.log(`[allhomes] ${noPrice.length} listings need price from detail page`);
+          // Limit to 5 detail fetches to avoid hammering
+          for (const listing of noPrice.slice(0, 5)) {
+            try {
+              const detail = await scrapeAllHomesDetail(listing.listingUrl);
+              if (detail?.price) {
+                listing.price = detail.price;
+                listing.priceDisplay = `$${detail.price.toLocaleString()}`;
+                listing.priceEstimated = false;
+                listing.priceConfidence = "confirmed";
+                listing.priceBasis = "Price from AllHomes detail page";
+                console.log(`[allhomes] Found price on detail page: ${listing.address} = $${detail.price.toLocaleString()}`);
+              }
+              if (detail?.landSizeM2) listing.landSizeM2 = detail.landSizeM2;
+              if (detail?.fullPhotoUrl) listing.photoUrl = detail.fullPhotoUrl;
+              // Rate limit
+              await new Promise((r) => setTimeout(r, 1500));
+            } catch {}
+          }
+        }
+
+        // Now apply budget filter to newly-priced listings
+        const filtered = listings.filter((l) => {
+          if (l.price && l.price > maxBudget * 1.05) {
+            console.log(`[allhomes] Post-enrichment budget filter: ${l.address} ($${l.price.toLocaleString()} > $${maxBudget.toLocaleString()})`);
+            return false;
+          }
+          return true;
+        });
+
+        return filtered.slice(0, 8);
       }
 
       // Fallback: check if page says "X properties for sale"

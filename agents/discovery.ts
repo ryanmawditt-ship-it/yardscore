@@ -4,6 +4,7 @@ import { getRealListings, type HomelyListing } from "@/scrapers/homely";
 import { scrapeAllHomesListings } from "@/scrapers/allhomes";
 import { findSuburbPick } from "@/lib/investment-intelligence";
 import { getPostcodeForSuburb } from "@/lib/geocode";
+import { estimateListingPrice } from "@/lib/price-estimator";
 
 // ── Photo mapping ──
 
@@ -132,7 +133,29 @@ export async function discoverProperties(
   const allhomesListings = await scrapeAllHomesListings(suburb, state, pc, maxBudget, bedrooms, propertyType);
   if (allhomesListings.length >= 2) {
     console.log(`[discovery] Got ${allhomesListings.length} REAL AllHomes listings for ${suburb}`);
-    const selected = allhomesListings.slice(0, 3);
+
+    // Estimate prices for Contact Agent listings
+    for (const l of allhomesListings) {
+      if (!l.price) {
+        const est = estimateListingPrice(suburb, state, l.bedrooms ?? bedrooms, l.bathrooms, l.landSizeM2);
+        // Only use estimate if within budget (with 20% tolerance for uncertainty)
+        if (est.estimatedPrice <= maxBudget * 1.20) {
+          l.price = est.estimatedPrice;
+          l.priceDisplay = `~$${est.estimatedPrice.toLocaleString()} est.`;
+          l.priceEstimated = true;
+          l.priceConfidence = est.confidence;
+          l.priceBasis = est.basis;
+          console.log(`[discovery] Estimated price for ${l.address}: $${est.estimatedPrice.toLocaleString()} (${est.confidence})`);
+        } else {
+          console.log(`[discovery] Estimated price $${est.estimatedPrice.toLocaleString()} exceeds budget — skipping ${l.address}`);
+        }
+      }
+    }
+
+    // Filter: must have a price (confirmed or estimated) within budget
+    const withPrice = allhomesListings.filter((l) => l.price && l.price <= maxBudget * 1.20);
+
+    const selected = withPrice.slice(0, 3);
     for (const l of selected) {
       listingMetaCache.set(l.address, {
         listingUrl: l.listingUrl,
@@ -144,7 +167,8 @@ export async function discoverProperties(
         source: "allhomes" as const,
       });
     }
-    return selected.map((l) => l.address);
+    if (selected.length >= 2) return selected.map((l) => l.address);
+    console.log(`[discovery] Only ${selected.length} priced listings after estimation for ${suburb}`);
   }
 
   if (allhomesListings.length === 1) {
