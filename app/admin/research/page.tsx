@@ -105,6 +105,8 @@ export default function ResearchDashboard() {
   const [stateFilter, setStateFilter] = useState('All')
   const [sortBy, setSortBy] = useState('overallScore')
   const [searchTerm, setSearchTerm] = useState('')
+  // Suburb drill-down
+  const [selectedSuburb, setSelectedSuburb] = useState<{ suburb: string; state: string } | null>(null)
 
   const loadStoredData = useCallback(async () => {
     setLoadingStored(true)
@@ -146,6 +148,28 @@ export default function ResearchDashboard() {
     })
     return scores
   }, [stored?.topScored, stateFilter, sortBy, searchTerm])
+
+  // Insights for the selected suburb
+  const suburbInsights = useMemo(() => {
+    if (!selectedSuburb) return []
+    const all = stored?.latestInsights || data?.insights || []
+    const name = selectedSuburb.suburb.toLowerCase()
+    const st = selectedSuburb.state.toUpperCase()
+    return all.filter(i =>
+      (i.suburb && i.suburb.toLowerCase() === name) ||
+      (i.state === st && (
+        i.title.toLowerCase().includes(name) ||
+        i.summary.toLowerCase().includes(name)
+      ))
+    )
+  }, [selectedSuburb, stored?.latestInsights, data?.insights])
+
+  const selectedScore = useMemo(() => {
+    if (!selectedSuburb) return null
+    return stored?.topScored?.find(
+      sc => sc.suburb.toLowerCase() === selectedSuburb.suburb.toLowerCase() && sc.state === selectedSuburb.state
+    ) || null
+  }, [selectedSuburb, stored?.topScored])
 
   if (!authenticated) {
     return (
@@ -225,12 +249,17 @@ export default function ResearchDashboard() {
         {stored?.trendingSuburbs && stored.trendingSuburbs.length > 0 && (
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
             <h2 className="text-lg font-bold text-gray-900 mb-1">Trending Suburbs</h2>
-            <p className="text-sm text-gray-500 mb-4">Most mentioned in Australian property news this month</p>
+            <p className="text-sm text-gray-500 mb-4">Most mentioned in Australian property news this month — click to see articles</p>
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               {stored.trendingSuburbs.slice(0, 10).map((s, i) => {
                 const score = stored.topScored?.find(sc => sc.suburb.toLowerCase() === s.suburb.toLowerCase() && sc.state === s.state)
+                const isSelected = selectedSuburb?.suburb.toLowerCase() === s.suburb.toLowerCase() && selectedSuburb?.state === s.state
                 return (
-                  <div key={i} className="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition">
+                  <button
+                    key={i}
+                    onClick={() => setSelectedSuburb(isSelected ? null : { suburb: s.suburb, state: s.state })}
+                    className={`border rounded-lg p-4 text-left transition cursor-pointer ${isSelected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : 'border-gray-100 hover:bg-gray-50'}`}
+                  >
                     <div className="flex items-start gap-2">
                       <span className="text-2xl font-bold text-blue-800 leading-none">{i + 1}</span>
                       <div className="min-w-0">
@@ -250,10 +279,80 @@ export default function ResearchDashboard() {
                         </div>
                       </div>
                     )}
-                  </div>
+                  </button>
                 )
               })}
             </div>
+
+            {/* Suburb drill-down panel */}
+            {selectedSuburb && (
+              <div className="mt-6 border-t border-gray-200 pt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">{selectedSuburb.suburb}, {selectedSuburb.state}</h3>
+                    <p className="text-sm text-gray-500">Research intelligence and articles</p>
+                  </div>
+                  <button onClick={() => setSelectedSuburb(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
+                </div>
+
+                {/* Score breakdown */}
+                {selectedScore && (
+                  <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-5">
+                    {[
+                      { label: 'Overall', val: selectedScore.overallScore },
+                      { label: 'Yield', val: selectedScore.yieldScore },
+                      { label: 'Growth', val: selectedScore.growthScore },
+                      { label: 'Infra', val: selectedScore.infrastructureScore },
+                      { label: 'Risk', val: selectedScore.riskScore },
+                      { label: 'Sentiment', val: selectedScore.sentimentScore },
+                    ].map((m, i) => (
+                      <div key={i} className="bg-gray-50 rounded-lg p-3 text-center">
+                        <p className="text-xs text-gray-500">{m.label}</p>
+                        <p className={`text-xl font-bold mt-1 ${m.val >= 7 ? 'text-green-600' : m.val >= 5 ? 'text-amber-600' : 'text-red-600'}`}>{m.val}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {selectedScore?.priceRange && (
+                  <p className="text-sm text-gray-600 mb-4">Price range: <span className="font-semibold">{selectedScore.priceRange}</span></p>
+                )}
+
+                {/* Matching articles/insights */}
+                {suburbInsights.length > 0 ? (
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto">
+                    {suburbInsights.map((insight, i) => (
+                      <div key={i} className="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition">
+                        <div className="flex items-center gap-2 mb-1">
+                          <UrgencyBadge urgency={insight.urgency} />
+                          <ImpactBadge impact={insight.impact} />
+                          <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{insight.category}</span>
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900">{insight.title}</p>
+                        <p className="text-sm text-gray-600 mt-1">{insight.summary}</p>
+                        {insight.source && (
+                          <a href={insight.source} target="_blank" rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline mt-2 inline-block">
+                            View source article
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-400 text-sm">
+                    <p>No specific articles found for {selectedSuburb.suburb} in the current research data.</p>
+                    <p className="mt-1">Run a new research cycle to gather fresh intelligence, or search Google News:</p>
+                    <a
+                      href={`https://news.google.com/search?q=${encodeURIComponent(selectedSuburb.suburb + ' ' + selectedSuburb.state + ' property')}&hl=en-AU&gl=AU&ceid=AU:en`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="inline-block mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition"
+                    >
+                      Search &quot;{selectedSuburb.suburb} property&quot; on Google News
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
