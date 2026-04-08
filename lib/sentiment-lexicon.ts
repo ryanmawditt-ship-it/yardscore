@@ -462,13 +462,16 @@ export const sentimentLexicon = {
     extreme: {
       score: 10,
       terms: [
-        'new train line', 'new metro station', 'new hospital',
-        'university campus', 'olympic venue', 'international airport',
-        'port expansion', 'major motorway',
-        'high speed rail station', 'aerotropolis precinct',
+        'new train line', 'new train station', 'new metro station',
+        'new hospital', 'hospital announced', 'hospital construction begins',
+        'university campus', 'new university precinct', 'olympic venue',
+        'international airport', 'airport expansion', 'new airport',
+        'port expansion', 'major motorway', 'motorway upgrade',
+        'high speed rail', 'high speed rail station', 'aerotropolis precinct',
         'submarine base', 'defence precinct',
         'cross river rail', 'suburban rail loop station',
         'metro tunnel station', 'western sydney airport',
+        'inland rail', 'rail extension', 'train line extension',
       ],
     },
     high: {
@@ -2135,6 +2138,160 @@ export function getSuburbSignals(text: string, suburb: string, state: string): S
     contextualAdjustments,
     phraseCombinationHits,
   }
+}
+
+// ============================================================
+// DIMENSION-AWARE SUBURB SCORER
+// Maps each signal type to the correct scoring dimension
+// so flood articles hit riskScore, train stations hit infraScore, etc.
+// ============================================================
+
+/** Map signal types from getSuburbSignals to scoring dimensions */
+const SIGNAL_TYPE_TO_DIMENSION: Record<string, string> = {
+  climate: 'riskScore',
+  strata: 'riskScore',
+  agent: 'riskScore', // agent euphemisms indicate hidden problems
+  auction: 'growthScore',
+  development: 'infrastructureScore',
+  lifecycle: 'growthScore',
+  demographic: 'growthScore',
+  bank: 'sentimentScore',
+  foreign: 'sentimentScore',
+  smsf: 'yieldScore',
+  airbnb: 'yieldScore',
+  state: 'sentimentScore',
+}
+
+/** Impact multipliers based on signal type importance */
+const SIGNAL_IMPACT: Record<string, number> = {
+  climate: 1.5,    // flood/fire = heavy impact on risk
+  development: 1.3, // infrastructure matters a lot
+  auction: 0.8,
+  lifecycle: 0.7,
+  strata: 0.6,
+  demographic: 0.6,
+  bank: 0.5,
+  agent: 0.4,
+  foreign: 0.4,
+  smsf: 0.3,
+  airbnb: 0.3,
+  state: 0.5,
+}
+
+export interface DimensionScore {
+  riskScore: number
+  infrastructureScore: number
+  yieldScore: number
+  growthScore: number
+  sentimentScore: number
+  overallScore: number
+  signalsFound: Array<{
+    dimension: string
+    term: string
+    impact: number
+    direction: string
+  }>
+}
+
+/**
+ * Score a suburb from an article using the full lexicon + signal dimension mapping.
+ * Each detected signal hits the correct scoring dimension:
+ * - flood/fire/contamination → riskScore
+ * - train station/hospital/road → infrastructureScore
+ * - vacancy/rental/yield → yieldScore
+ * - price growth/gentrification/demand → growthScore
+ * - rate cuts/buyer confidence/policy → sentimentScore
+ */
+export function scoreSuburbFromArticle(
+  articleText: string,
+  suburb: string,
+  state: string,
+  currentScores: {
+    riskScore: number
+    infrastructureScore: number
+    yieldScore: number
+    growthScore: number
+    sentimentScore: number
+    overallScore: number
+  },
+): DimensionScore {
+  // Get all signals from the full lexicon engine
+  const suburbResult = getSuburbSignals(articleText, suburb, state)
+  const articleResult = scoreArticle(articleText)
+
+  const newScores = { ...currentScores }
+  const signalsFound: DimensionScore['signalsFound'] = []
+
+  // 1. Map typed signals from getSuburbSignals to dimensions
+  for (const sig of suburbResult.signals) {
+    const dimension = SIGNAL_TYPE_TO_DIMENSION[sig.type] || 'sentimentScore'
+    const multiplier = SIGNAL_IMPACT[sig.type] || 0.5
+    const isBullish = sig.sentiment === 'bullish'
+
+    // Score 5 = neutral. Above 5 = bullish, below 5 = bearish
+    const delta = (sig.score - 5) * 0.2 * multiplier
+    const dimKey = dimension as keyof typeof newScores
+    newScores[dimKey] = Math.max(0, Math.min(10, newScores[dimKey] + delta))
+
+    if (Math.abs(delta) >= 0.1) {
+      signalsFound.push({
+        dimension,
+        term: sig.signal,
+        impact: Math.round(delta * 10) / 10,
+        direction: isBullish ? 'positive' : 'negative',
+      })
+    }
+  }
+
+  // 2. Map infrastructure signals from scoreArticle to infrastructureScore
+  for (const infraSig of articleResult.infrastructureSignals) {
+    const term = infraSig.replace(/ \(\+\d+\)/, '')
+    newScores.infrastructureScore = Math.min(10, newScores.infrastructureScore + 0.5)
+    signalsFound.push({ dimension: 'infrastructureScore', term, impact: 0.5, direction: 'positive' })
+  }
+
+  // 3. Map rental signals to yieldScore
+  for (const rentalSig of articleResult.rentalSignals) {
+    const isBullish = rentalSig.includes('bullish')
+    const term = rentalSig.replace(/ \((bullish|bearish)\)/, '')
+    const delta = isBullish ? 0.4 : -0.4
+    newScores.yieldScore = Math.max(0, Math.min(10, newScores.yieldScore + delta))
+    signalsFound.push({ dimension: 'yieldScore', term, impact: delta, direction: isBullish ? 'positive' : 'negative' })
+  }
+
+  // 4. Map policy signals to sentimentScore
+  for (const policySig of articleResult.policySignals) {
+    const isBullish = policySig.includes('bullish')
+    const term = policySig.replace(/ \((bullish|bearish)\)/, '')
+    const delta = isBullish ? 0.5 : -0.5
+    newScores.sentimentScore = Math.max(0, Math.min(10, newScores.sentimentScore + delta))
+    signalsFound.push({ dimension: 'sentimentScore', term, impact: delta, direction: isBullish ? 'positive' : 'negative' })
+  }
+
+  // 5. Apply contextual adjustments from phrase combinations
+  for (const adj of suburbResult.contextualAdjustments) {
+    const delta = adj.adjustment * 0.1
+    newScores.sentimentScore = Math.max(0, Math.min(10, newScores.sentimentScore + delta))
+    if (Math.abs(delta) >= 0.1) {
+      signalsFound.push({ dimension: 'sentimentScore', term: adj.term, impact: Math.round(delta * 10) / 10, direction: delta > 0 ? 'positive' : 'negative' })
+    }
+  }
+
+  // Round all scores
+  for (const key of Object.keys(newScores) as Array<keyof typeof newScores>) {
+    newScores[key] = Math.round(newScores[key] * 10) / 10
+  }
+
+  // Recalculate weighted overall
+  newScores.overallScore = Math.round((
+    newScores.yieldScore * 0.25 +
+    newScores.growthScore * 0.25 +
+    newScores.infrastructureScore * 0.20 +
+    newScores.riskScore * 0.15 +
+    newScores.sentimentScore * 0.15
+  ) * 10) / 10
+
+  return { ...newScores, signalsFound }
 }
 
 // ============================================================

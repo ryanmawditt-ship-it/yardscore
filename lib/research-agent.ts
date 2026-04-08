@@ -12,7 +12,7 @@ import { classifyAndRank, type ClassifiedInsight } from '@/lib/intelligence-clas
 import { monitorCouncilDAs, type DAInsight } from '@/lib/council-da-monitor'
 import { analyzeNewsSentiment, type SentimentResult } from '@/lib/news-sentiment-analyzer'
 import { KnowledgeStore } from '@/lib/knowledge-store'
-import { scoreArticle } from '@/lib/sentiment-lexicon'
+import { scoreArticle, scoreSuburbFromArticle } from '@/lib/sentiment-lexicon'
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -308,13 +308,13 @@ Only include insights relevant to Australian property investment. Skip generic o
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Update suburb scores based on today's classified insights.
- * Positive articles push scores up, negative articles push them down.
- * Uses the lexicon pre-scores already attached to each insight.
+ * Update suburb scores using dimension-aware lexicon scoring.
+ * Each article is run through the full lexicon — flood terms hit riskScore,
+ * train station terms hit infraScore, rental terms hit yieldScore, etc.
  */
 async function updateSuburbScoresFromInsights(
   insights: ClassifiedInsight[],
-  sentiment: SentimentResult,
+  _sentiment: SentimentResult,
 ): Promise<void> {
   // Group insights by suburb
   const suburbMap = new Map<string, ClassifiedInsight[]>()
@@ -331,78 +331,65 @@ async function updateSuburbScoresFromInsights(
   }
 
   let updated = 0
+  let totalSignals = 0
   for (const [key, articles] of Array.from(suburbMap.entries())) {
     const [suburb, state] = key.split('|')
 
-    // Get existing score (may be null if suburb not yet scored)
+    // Get existing score or start from neutral baseline
     const existing = await KnowledgeStore.getSuburbScore(suburb, state)
+    let currentScores = {
+      riskScore: (existing?.riskScore as number) ?? 5,
+      infrastructureScore: (existing?.infrastructureScore as number) ?? 5,
+      yieldScore: (existing?.yieldScore as number) ?? 5,
+      growthScore: (existing?.growthScore as number) ?? 5,
+      sentimentScore: (existing?.sentimentScore as number) ?? 5,
+      overallScore: (existing?.overallScore as number) ?? 5,
+    }
 
-    const positive = articles.filter(a => a.impact === 'positive')
-    const negative = articles.filter(a => a.impact === 'negative')
-    const infra = articles.filter(a => a.category === 'infrastructure')
-    const rental = articles.filter(a => a.category === 'rental')
+    const allSignals: Array<{ dimension: string; term: string; impact: number; direction: string }> = []
 
-    // Calculate sentiment adjustment from today's articles
-    // Each positive article: +0.5, each negative: -0.5
-    const sentimentDelta = (positive.length * 0.5) - (negative.length * 0.5)
+    // Run each article through the dimension-aware lexicon scorer
+    for (const article of articles) {
+      const articleText = `${article.title}. ${article.summary}`
+      const result = scoreSuburbFromArticle(articleText, suburb, state, currentScores)
 
-    // Base scores — use existing or start from 5 (neutral)
-    const baseYield = (existing?.yieldScore as number) ?? 5
-    const baseGrowth = (existing?.growthScore as number) ?? 5
-    const baseInfra = (existing?.infrastructureScore as number) ?? 5
-    const baseRisk = (existing?.riskScore as number) ?? 5
-    const baseSentiment = (existing?.sentimentScore as number) ?? 5
+      currentScores = {
+        riskScore: result.riskScore,
+        infrastructureScore: result.infrastructureScore,
+        yieldScore: result.yieldScore,
+        growthScore: result.growthScore,
+        sentimentScore: result.sentimentScore,
+        overallScore: result.overallScore,
+      }
+      allSignals.push(...result.signalsFound)
+    }
 
-    // Apply adjustments
-    const newSentiment = Math.max(0, Math.min(10, baseSentiment + sentimentDelta))
-    const newInfra = infra.length > 0
-      ? Math.min(10, baseInfra + infra.length * 0.5)
-      : baseInfra
-    const newRisk = negative.some(a => a.category === 'risk')
-      ? Math.max(0, baseRisk - 0.5)
-      : baseRisk
-    const newYield = rental.some(a => a.impact === 'positive')
-      ? Math.min(10, baseYield + 0.3)
-      : rental.some(a => a.impact === 'negative')
-        ? Math.max(0, baseYield - 0.3)
-        : baseYield
-    const newGrowth = positive.length > negative.length
-      ? Math.min(10, baseGrowth + 0.3)
-      : negative.length > positive.length
-        ? Math.max(0, baseGrowth - 0.3)
-        : baseGrowth
+    // Only save if signals were found
+    if (allSignals.length > 0) {
+      // Build key reasons from the top signals that hit each dimension
+      const keyReasons = allSignals
+        .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
+        .slice(0, 5)
+        .map(s => `${s.term} → ${s.dimension} ${s.direction === 'positive' ? '+' : ''}${s.impact}`)
 
-    // Weighted overall score
-    const overallScore = Math.round(
-      (newYield * 0.25 + newGrowth * 0.25 + newInfra * 0.20 + newRisk * 0.15 + newSentiment * 0.15) * 10
-    ) / 10
+      // Keep existing reasons too
+      const existingReasons = (existing?.keyReasons as string[]) || []
+      const mergedReasons = [...keyReasons, ...existingReasons.slice(0, 3)].slice(0, 8)
 
-    // Build key reasons from today's articles
-    const keyReasons = articles.slice(0, 3).map(a =>
-      `[${a.impact}] ${a.title}`
-    )
-    // Keep existing reasons if we have them
-    const existingReasons = (existing?.keyReasons as string[]) || []
-    const mergedReasons = [...keyReasons, ...existingReasons.slice(0, 2)].slice(0, 5)
+      await KnowledgeStore.saveSuburbScore(suburb, state, {
+        ...currentScores,
+        priceRange: (existing?.priceRange as string) || 'N/A',
+        keyReasons: mergedReasons,
+        lastUpdated: new Date().toISOString(),
+      })
 
-    await KnowledgeStore.saveSuburbScore(suburb, state, {
-      yieldScore: Math.round(newYield * 10) / 10,
-      growthScore: Math.round(newGrowth * 10) / 10,
-      infrastructureScore: Math.round(newInfra * 10) / 10,
-      riskScore: Math.round(newRisk * 10) / 10,
-      sentimentScore: Math.round(newSentiment * 10) / 10,
-      overallScore,
-      priceRange: (existing?.priceRange as string) || 'N/A',
-      keyReasons: mergedReasons,
-      lastUpdated: new Date().toISOString(),
-    })
-
-    const direction = sentimentDelta > 0 ? '+' + sentimentDelta.toFixed(1) : sentimentDelta.toFixed(1)
-    console.log(`[scoring] ${suburb}, ${state}: sentiment ${direction} → overall ${overallScore} (${positive.length}+ ${negative.length}-)`)
-    updated++
+      totalSignals += allSignals.length
+      console.log(`[scoring] ${suburb}, ${state}: ${allSignals.length} signals → risk:${currentScores.riskScore} infra:${currentScores.infrastructureScore} yield:${currentScores.yieldScore} growth:${currentScores.growthScore} overall:${currentScores.overallScore}`)
+      updated++
+    }
   }
 
-  console.log(`[research] Updated scores for ${updated} suburbs from today's ${insights.length} insights`)
+  console.log(`[research] Updated ${updated} suburbs with ${totalSignals} dimension-specific signals`)
 }
 
 /**
