@@ -107,6 +107,8 @@ export default function ResearchDashboard() {
   const [searchTerm, setSearchTerm] = useState('')
   // Suburb drill-down
   const [selectedSuburb, setSelectedSuburb] = useState<{ suburb: string; state: string } | null>(null)
+  const [suburbArticles, setSuburbArticles] = useState<Insight[]>([])
+  const [loadingArticles, setLoadingArticles] = useState(false)
 
   const loadStoredData = useCallback(async () => {
     setLoadingStored(true)
@@ -149,20 +151,20 @@ export default function ResearchDashboard() {
     return scores
   }, [stored?.topScored, stateFilter, sortBy, searchTerm])
 
-  // Insights for the selected suburb
-  const suburbInsights = useMemo(() => {
-    if (!selectedSuburb) return []
-    const all = stored?.latestInsights || data?.insights || []
-    const name = selectedSuburb.suburb.toLowerCase()
-    const st = selectedSuburb.state.toUpperCase()
-    return all.filter(i =>
-      (i.suburb && i.suburb.toLowerCase() === name) ||
-      (i.state === st && (
-        i.title.toLowerCase().includes(name) ||
-        i.summary.toLowerCase().includes(name)
-      ))
-    )
-  }, [selectedSuburb, stored?.latestInsights, data?.insights])
+  // Fetch suburb-specific insights from Redis when a suburb is selected
+  const fetchSuburbArticles = useCallback(async (suburb: string, state: string) => {
+    setLoadingArticles(true)
+    setSuburbArticles([])
+    try {
+      const res = await fetch(`/api/suburb-insights?suburb=${encodeURIComponent(suburb)}&state=${encodeURIComponent(state)}`, {
+        headers: { 'x-admin-key': adminKey },
+      })
+      if (res.ok) {
+        const json = await res.json()
+        setSuburbArticles(json.insights || [])
+      }
+    } catch {} finally { setLoadingArticles(false) }
+  }, [adminKey])
 
   const selectedScore = useMemo(() => {
     if (!selectedSuburb) return null
@@ -257,7 +259,10 @@ export default function ResearchDashboard() {
                 return (
                   <button
                     key={i}
-                    onClick={() => setSelectedSuburb(isSelected ? null : { suburb: s.suburb, state: s.state })}
+                    onClick={() => {
+                      if (isSelected) { setSelectedSuburb(null); setSuburbArticles([]) }
+                      else { setSelectedSuburb({ suburb: s.suburb, state: s.state }); fetchSuburbArticles(s.suburb, s.state) }
+                    }}
                     className={`border rounded-lg p-4 text-left transition cursor-pointer ${isSelected ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' : 'border-gray-100 hover:bg-gray-50'}`}
                   >
                     <div className="flex items-start gap-2">
@@ -292,7 +297,7 @@ export default function ResearchDashboard() {
                     <h3 className="text-lg font-bold text-gray-900">{selectedSuburb.suburb}, {selectedSuburb.state}</h3>
                     <p className="text-sm text-gray-500">Research intelligence and articles</p>
                   </div>
-                  <button onClick={() => setSelectedSuburb(null)} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
+                  <button onClick={() => { setSelectedSuburb(null); setSuburbArticles([]) }} className="text-gray-400 hover:text-gray-600 text-sm">Close</button>
                 </div>
 
                 {/* Score breakdown */}
@@ -318,9 +323,14 @@ export default function ResearchDashboard() {
                 )}
 
                 {/* Matching articles/insights */}
-                {suburbInsights.length > 0 ? (
+                {loadingArticles ? (
+                  <div className="text-center py-8">
+                    <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-sm text-gray-400 mt-2">Loading articles...</p>
+                  </div>
+                ) : suburbArticles.length > 0 ? (
                   <div className="space-y-3 max-h-[500px] overflow-y-auto">
-                    {suburbInsights.map((insight, i) => (
+                    {suburbArticles.map((insight, i) => (
                       <div key={i} className="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition">
                         <div className="flex items-center gap-2 mb-1">
                           <UrgencyBadge urgency={insight.urgency} />
