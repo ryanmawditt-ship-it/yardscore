@@ -32,15 +32,15 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return
     try {
       const id = `insight:${Date.now()}:${Math.random().toString(36).slice(2)}`
-      await kv.set(id, JSON.stringify(insight), { ex: 60 * 60 * 24 * 90 }) // 90 days
+      await kv.set(id, JSON.stringify(insight), { ex: 60 * 60 * 24 * 90 }) // 90 days — auto-expires
       await kv.lpush('insights:all', id)
-      await kv.ltrim('insights:all', 0, 999) // keep last 1000
+      // No ltrim — keep all insights. Individual records auto-expire after 90 days.
+      // Lists accumulate stale IDs over time but getters handle null lookups gracefully.
 
       // Index by state
       const state = insight.state as string | undefined
       if (state) {
         await kv.lpush(`insights:state:${state}`, id)
-        await kv.ltrim(`insights:state:${state}`, 0, 199)
       }
 
       // Index by suburb
@@ -48,14 +48,12 @@ export const KnowledgeStore = {
       if (suburb) {
         const suburbKey = suburb.toLowerCase().replace(/\s+/g, '-')
         await kv.lpush(`insights:suburb:${suburbKey}`, id)
-        await kv.ltrim(`insights:suburb:${suburbKey}`, 0, 49)
       }
 
       // Index by urgency
       const urgency = insight.urgency as string | undefined
       if (urgency === 'high' || urgency === 'breaking') {
         await kv.lpush('insights:urgent', id)
-        await kv.ltrim('insights:urgent', 0, 99)
       }
     } catch (e) {
       console.error('[knowledge-store] saveInsight failed:', e instanceof Error ? e.message : String(e))
@@ -82,7 +80,7 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return []
     try {
       const suburbKey = suburb.toLowerCase().replace(/\s+/g, '-')
-      const ids = await kv.lrange(`insights:suburb:${suburbKey}`, 0, 19) as string[]
+      const ids = await kv.lrange(`insights:suburb:${suburbKey}`, 0, 99) as string[]
       if (!ids || ids.length === 0) return []
       const insights = await Promise.all(
         ids.map(async (id) => {
@@ -98,7 +96,7 @@ export const KnowledgeStore = {
   async getStateInsights(state: string): Promise<Record<string, unknown>[]> {
     if (!isKvConfigured()) return []
     try {
-      const ids = await kv.lrange(`insights:state:${state}`, 0, 29) as string[]
+      const ids = await kv.lrange(`insights:state:${state}`, 0, 199) as string[]
       if (!ids || ids.length === 0) return []
       const insights = await Promise.all(
         ids.map(async (id) => {
@@ -114,7 +112,7 @@ export const KnowledgeStore = {
   async getUrgentInsights(): Promise<Record<string, unknown>[]> {
     if (!isKvConfigured()) return []
     try {
-      const ids = await kv.lrange('insights:urgent', 0, 19) as string[]
+      const ids = await kv.lrange('insights:urgent', 0, 99) as string[]
       if (!ids || ids.length === 0) return []
       const insights = await Promise.all(
         ids.map(async (id) => {
@@ -162,14 +160,12 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return
     try {
       const id = `infra:${Date.now()}:${Math.random().toString(36).slice(2)}`
-      await kv.set(id, JSON.stringify(alert), { ex: 60 * 60 * 24 * 180 }) // 6 months
+      await kv.set(id, JSON.stringify(alert), { ex: 60 * 60 * 24 * 180 }) // 6 months — auto-expires
       await kv.lpush('infra:alerts', id)
-      await kv.ltrim('infra:alerts', 0, 199)
 
       const state = alert.state as string | undefined
       if (state) {
         await kv.lpush(`infra:state:${state}`, id)
-        await kv.ltrim(`infra:state:${state}`, 0, 49)
       }
     } catch (e) {
       console.error('[knowledge-store] saveInfrastructureAlert failed:', e instanceof Error ? e.message : String(e))
@@ -180,7 +176,7 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return []
     try {
       const key = state ? `infra:state:${state}` : 'infra:alerts'
-      const ids = await kv.lrange(key, 0, 19) as string[]
+      const ids = await kv.lrange(key, 0, 99) as string[]
       if (!ids || ids.length === 0) return []
       const alerts = await Promise.all(
         ids.map(async (id) => {
