@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [stats, latestInsights, urgentInsights, sentiment, infraAlerts, lastRun, runHistory, connected] = await Promise.all([
+    const [stats, latestInsights, urgentInsights, sentiment, infraAlerts, lastRun, runHistory, connected, trendingSuburbs, topScored] = await Promise.all([
       KnowledgeStore.getStats(),
       KnowledgeStore.getLatestInsights(50),
       KnowledgeStore.getUrgentInsights(),
@@ -84,6 +84,8 @@ export async function GET(request: NextRequest) {
       KnowledgeStore.getLastRunStats(),
       KnowledgeStore.getRunHistory(7),
       KnowledgeStore.testConnection(),
+      KnowledgeStore.getTopMentionedSuburbs(10),
+      KnowledgeStore.getTopScoredSuburbs(50),
     ])
 
     return NextResponse.json({
@@ -95,6 +97,8 @@ export async function GET(request: NextRequest) {
       lastRun,
       runHistory,
       connected,
+      trendingSuburbs,
+      topScored,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

@@ -194,19 +194,68 @@ export const KnowledgeStore = {
   },
 
   // ─────────────────────────────────────────────────────────
-  // SUBURB SCORES
+  // SUBURB MENTIONS (trending tracking)
+  // ─────────────────────────────────────────────────────────
+
+  async incrementSuburbMention(suburb: string, state: string): Promise<void> {
+    if (!isKvConfigured()) return
+    try {
+      const countKey = `mentions:count:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
+      await kv.incr(countKey)
+      await kv.expire(countKey, 60 * 60 * 24 * 30) // 30-day rolling window
+    } catch (e) {
+      console.error('[knowledge-store] incrementSuburbMention failed:', e instanceof Error ? e.message : String(e))
+    }
+  },
+
+  async getTopMentionedSuburbs(limit: number = 10): Promise<Array<{
+    suburb: string
+    state: string
+    mentions: number
+  }>> {
+    if (!isKvConfigured()) return []
+    try {
+      const keys = await kv.keys('mentions:count:*') as string[]
+      if (!keys || keys.length === 0) return []
+
+      const suburbs = await Promise.all(
+        keys.map(async (key) => {
+          const parts = key.replace('mentions:count:', '').split(':')
+          const state = parts[0].toUpperCase()
+          const suburb = parts[1].replace(/-/g, ' ')
+            .split(' ')
+            .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ')
+          const count = await kv.get(key)
+          const mentions = typeof count === 'number' ? count : parseInt(String(count || '0'))
+          return { suburb, state, mentions }
+        })
+      )
+
+      return suburbs
+        .filter(s => s.mentions > 0)
+        .sort((a, b) => b.mentions - a.mentions)
+        .slice(0, limit)
+    } catch { return [] }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  // SUBURB SCORES (investment scorecard)
   // ─────────────────────────────────────────────────────────
 
   async saveSuburbScore(suburb: string, state: string, data: Record<string, unknown>): Promise<void> {
     if (!isKvConfigured()) return
     try {
-      const key = `suburb:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
+      const key = `score:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
+      const overall = (data.overallScore as number) || 0
       await kv.set(key, JSON.stringify({
         ...data,
         suburb,
         state,
         updatedAt: new Date().toISOString(),
-      }), { ex: 60 * 60 * 24 * 7 }) // 7 days
+      }), { ex: 60 * 60 * 24 * 30 }) // 30 days
+      // Sorted set for ranking
+      await kv.zadd('suburbs:scores:all', { score: overall, member: `${suburb}|${state}` })
     } catch (e) {
       console.error('[knowledge-store] saveSuburbScore failed:', e instanceof Error ? e.message : String(e))
     }
@@ -215,11 +264,30 @@ export const KnowledgeStore = {
   async getSuburbScore(suburb: string, state: string): Promise<Record<string, unknown> | null> {
     if (!isKvConfigured()) return null
     try {
-      const key = `suburb:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
+      const key = `score:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
       const data = await kv.get(key)
       if (!data) return null
       return typeof data === 'string' ? JSON.parse(data) : data as Record<string, unknown>
     } catch { return null }
+  },
+
+  async getTopScoredSuburbs(limit: number = 50): Promise<Record<string, unknown>[]> {
+    if (!isKvConfigured()) return []
+    try {
+      const members = await kv.zrange('suburbs:scores:all', 0, limit - 1, { rev: true }) as string[]
+      if (!members || members.length === 0) return []
+
+      const scores = await Promise.all(
+        members.map(async (member) => {
+          const [suburb, subState] = member.split('|')
+          const key = `score:${subState.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
+          const data = await kv.get(key)
+          if (!data) return null
+          return typeof data === 'string' ? JSON.parse(data) : data
+        })
+      )
+      return scores.filter(Boolean) as Record<string, unknown>[]
+    } catch { return [] }
   },
 
   // ─────────────────────────────────────────────────────────
