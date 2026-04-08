@@ -303,80 +303,16 @@ Only include insights relevant to Australian property investment. Skip generic o
 }
 
 // ─────────────────────────────────────────────────────────────
-// SUBURB SCORING — Claude scores each suburb individually
-// based on its accumulated articles from research
+// SUBURB SCORING — updates scores based on today's articles
+// No Claude API calls needed — uses article impact directly
 // ─────────────────────────────────────────────────────────────
 
-const SCORING_SYSTEM_PROMPT =
-  'You are an Australian property investment analyst. Score this suburb based ONLY on the articles provided. ' +
-  'Good news = higher scores. Bad news = lower scores. Be specific — reference the actual articles in your reasons. ' +
-  'Return ONLY a valid JSON object. No markdown, no explanation.'
-
 /**
- * Score a single suburb based on all its articles.
- * Called once per suburb that appears in today's research.
+ * Update suburb scores based on today's classified insights.
+ * Positive articles push scores up, negative articles push them down.
+ * Uses the lexicon pre-scores already attached to each insight.
  */
-async function scoreOneSuburb(
-  suburb: string,
-  state: string,
-  articles: ClassifiedInsight[],
-  sentiment: SentimentResult,
-): Promise<void> {
-  const positive = articles.filter(a => a.impact === 'positive')
-  const negative = articles.filter(a => a.impact === 'negative')
-  const infra = articles.filter(a => a.category === 'infrastructure')
-
-  const articlesSummary = articles.slice(0, 10).map((a, i) =>
-    `[${i + 1}] (${a.impact}) ${a.title}: ${a.summary}`
-  ).join('\n')
-
-  const userContent = `Score ${suburb}, ${state} for property investment based on these articles from today's research:
-
-${articlesSummary || 'No specific articles — score based on general market conditions.'}
-
-Summary: ${positive.length} positive articles, ${negative.length} negative articles, ${infra.length} infrastructure mentions.
-Market sentiment: ${sentiment.overallSentiment} (${sentiment.sentimentScore}/100). Rates: ${sentiment.interestRateOutlook}. Supply: ${sentiment.housingSupplyOutlook}. Demand: ${sentiment.demandOutlook}.
-
-Return JSON:
-{
-  "yieldScore": 0-10,
-  "growthScore": 0-10,
-  "infrastructureScore": 0-10,
-  "riskScore": 0-10 (10 = very safe),
-  "sentimentScore": 0-10 (based on the article tone above),
-  "overallScore": 0-10 (weighted average),
-  "priceRange": "$Xk–$Xk" (your estimate),
-  "keyReasons": ["specific reason from the articles", "another specific reason"]
-}`
-
-  try {
-    const text = await askClaudeWithTimeout(SCORING_SYSTEM_PROMPT, userContent, BATCH_TIMEOUT_MS)
-    const score = JSON.parse(text)
-
-    if (typeof score.overallScore === 'number') {
-      await KnowledgeStore.saveSuburbScore(suburb, state, {
-        yieldScore: score.yieldScore ?? 5,
-        growthScore: score.growthScore ?? 5,
-        infrastructureScore: score.infrastructureScore ?? 5,
-        riskScore: score.riskScore ?? 5,
-        sentimentScore: score.sentimentScore ?? 5,
-        overallScore: score.overallScore,
-        priceRange: score.priceRange ?? 'N/A',
-        keyReasons: Array.isArray(score.keyReasons) ? score.keyReasons : [],
-        lastUpdated: new Date().toISOString(),
-      })
-      console.log(`[research] Scored ${suburb}, ${state}: ${score.overallScore}/10 — ${(score.keyReasons || []).slice(0, 1).join('')}`)
-    }
-  } catch (e) {
-    console.error(`[research] Failed to score ${suburb}, ${state}:`, e instanceof Error ? e.message : String(e))
-  }
-}
-
-/**
- * Score every suburb that appeared in today's research.
- * Each suburb gets its own Claude call with its own articles.
- */
-async function scoreSuburbsFromIntelligence(
+async function updateSuburbScoresFromInsights(
   insights: ClassifiedInsight[],
   sentiment: SentimentResult,
 ): Promise<void> {
@@ -389,27 +325,133 @@ async function scoreSuburbsFromIntelligence(
     suburbMap.get(key)!.push(i)
   }
 
-  const suburbsToScore = Array.from(suburbMap.entries())
-  if (suburbsToScore.length === 0) {
-    console.log('[research] No suburb-specific insights to score')
+  if (suburbMap.size === 0) {
+    console.log('[research] No suburb-specific insights to update scores')
     return
   }
 
-  console.log(`[research] Scoring ${suburbsToScore.length} suburbs individually from today's articles`)
-
-  let scored = 0
-  for (const [key, articles] of suburbsToScore) {
+  let updated = 0
+  for (const [key, articles] of Array.from(suburbMap.entries())) {
     const [suburb, state] = key.split('|')
-    await scoreOneSuburb(suburb, state, articles, sentiment)
-    scored++
 
-    // Rate limit: 2s between each scoring call
-    if (scored < suburbsToScore.length) {
-      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
-    }
+    // Get existing score (may be null if suburb not yet scored)
+    const existing = await KnowledgeStore.getSuburbScore(suburb, state)
+
+    const positive = articles.filter(a => a.impact === 'positive')
+    const negative = articles.filter(a => a.impact === 'negative')
+    const infra = articles.filter(a => a.category === 'infrastructure')
+    const rental = articles.filter(a => a.category === 'rental')
+
+    // Calculate sentiment adjustment from today's articles
+    // Each positive article: +0.5, each negative: -0.5
+    const sentimentDelta = (positive.length * 0.5) - (negative.length * 0.5)
+
+    // Base scores — use existing or start from 5 (neutral)
+    const baseYield = (existing?.yieldScore as number) ?? 5
+    const baseGrowth = (existing?.growthScore as number) ?? 5
+    const baseInfra = (existing?.infrastructureScore as number) ?? 5
+    const baseRisk = (existing?.riskScore as number) ?? 5
+    const baseSentiment = (existing?.sentimentScore as number) ?? 5
+
+    // Apply adjustments
+    const newSentiment = Math.max(0, Math.min(10, baseSentiment + sentimentDelta))
+    const newInfra = infra.length > 0
+      ? Math.min(10, baseInfra + infra.length * 0.5)
+      : baseInfra
+    const newRisk = negative.some(a => a.category === 'risk')
+      ? Math.max(0, baseRisk - 0.5)
+      : baseRisk
+    const newYield = rental.some(a => a.impact === 'positive')
+      ? Math.min(10, baseYield + 0.3)
+      : rental.some(a => a.impact === 'negative')
+        ? Math.max(0, baseYield - 0.3)
+        : baseYield
+    const newGrowth = positive.length > negative.length
+      ? Math.min(10, baseGrowth + 0.3)
+      : negative.length > positive.length
+        ? Math.max(0, baseGrowth - 0.3)
+        : baseGrowth
+
+    // Weighted overall score
+    const overallScore = Math.round(
+      (newYield * 0.25 + newGrowth * 0.25 + newInfra * 0.20 + newRisk * 0.15 + newSentiment * 0.15) * 10
+    ) / 10
+
+    // Build key reasons from today's articles
+    const keyReasons = articles.slice(0, 3).map(a =>
+      `[${a.impact}] ${a.title}`
+    )
+    // Keep existing reasons if we have them
+    const existingReasons = (existing?.keyReasons as string[]) || []
+    const mergedReasons = [...keyReasons, ...existingReasons.slice(0, 2)].slice(0, 5)
+
+    await KnowledgeStore.saveSuburbScore(suburb, state, {
+      yieldScore: Math.round(newYield * 10) / 10,
+      growthScore: Math.round(newGrowth * 10) / 10,
+      infrastructureScore: Math.round(newInfra * 10) / 10,
+      riskScore: Math.round(newRisk * 10) / 10,
+      sentimentScore: Math.round(newSentiment * 10) / 10,
+      overallScore,
+      priceRange: (existing?.priceRange as string) || 'N/A',
+      keyReasons: mergedReasons,
+      lastUpdated: new Date().toISOString(),
+    })
+
+    const direction = sentimentDelta > 0 ? '+' + sentimentDelta.toFixed(1) : sentimentDelta.toFixed(1)
+    console.log(`[scoring] ${suburb}, ${state}: sentiment ${direction} → overall ${overallScore} (${positive.length}+ ${negative.length}-)`)
+    updated++
   }
 
-  console.log(`[research] Finished scoring ${scored} suburbs from today's intelligence`)
+  console.log(`[research] Updated scores for ${updated} suburbs from today's ${insights.length} insights`)
+}
+
+/**
+ * Seed scores for handbook suburbs that don't have a score yet.
+ * Uses static data from investment-intelligence.ts as baseline.
+ * Only runs for suburbs not already in the database.
+ */
+async function seedMissingSuburbScores(sentiment: SentimentResult): Promise<void> {
+  try {
+    const { investmentIntelligence } = await import('@/lib/investment-intelligence')
+
+    let seeded = 0
+    for (const [state, tiers] of Object.entries(investmentIntelligence)) {
+      for (const tier of Object.values(tiers)) {
+        for (const pick of (tier as { topPicks: Array<{
+          suburb: string; yieldScore: number; growthScore: number;
+          riskScore: number; medianHousePrice: number;
+          infrastructureProjects: string[]; rationale: string
+        }> }).topPicks || []) {
+          // Check if score already exists
+          const existing = await KnowledgeStore.getSuburbScore(pick.suburb, state)
+          if (existing) continue // Already scored, skip
+
+          const yieldScore = Math.min(10, pick.yieldScore)
+          const growthScore = Math.min(10, pick.growthScore)
+          const infraScore = Math.min(10, (pick.infrastructureProjects?.length || 0) * 2 + 2)
+          const riskScore = Math.min(10, 10 - pick.riskScore)
+          const sentimentScore = sentiment.overallSentiment === 'bullish' ? 6 : sentiment.overallSentiment === 'bearish' ? 4 : 5
+
+          const overallScore = Math.round(
+            (yieldScore * 0.25 + growthScore * 0.25 + infraScore * 0.2 + riskScore * 0.15 + sentimentScore * 0.15) * 10
+          ) / 10
+
+          const priceK = Math.round(pick.medianHousePrice / 1000)
+          await KnowledgeStore.saveSuburbScore(pick.suburb, state, {
+            yieldScore, growthScore, infrastructureScore: infraScore,
+            riskScore, sentimentScore, overallScore,
+            priceRange: `$${Math.round(priceK * 0.85)}k–$${Math.round(priceK * 1.15)}k`,
+            keyReasons: [pick.rationale?.slice(0, 100) || 'Handbook baseline'],
+            lastUpdated: new Date().toISOString(),
+          })
+          seeded++
+        }
+      }
+    }
+    if (seeded > 0) console.log(`[research] Seeded ${seeded} new suburb scores from handbook`)
+  } catch (e) {
+    console.error('[research] Handbook seed failed:', e instanceof Error ? e.message : String(e))
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -474,9 +516,13 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
   // Persist sentiment
   await KnowledgeStore.saveSentiment(sentiment as unknown as Record<string, unknown>)
 
-  // Step 6: Seed suburb scores from investment intelligence
-  console.log('[research] Step 6: Seeding suburb scores from investment intelligence...')
-  await scoreSuburbsFromIntelligence(classifiedInsights, sentiment)
+  // Step 6: Update suburb scores from today's insights (fast, no Claude call)
+  console.log('[research] Step 6: Updating suburb scores from today\'s insights...')
+  await updateSuburbScoresFromInsights(classifiedInsights, sentiment)
+
+  // Step 7: Seed scores for any handbook suburbs not yet scored
+  console.log('[research] Step 7: Seeding missing suburb scores from handbook...')
+  await seedMissingSuburbScores(sentiment)
 
   const kvStats = await KnowledgeStore.getStats()
   console.log(`[research] Persisted ${savedCount} insights, ${mentionCount} suburb mentions to KV. Total in store: ${kvStats.totalInsights} insights, ${kvStats.infraAlerts} infra alerts, ${kvStats.sentimentHistory} sentiment records`)
