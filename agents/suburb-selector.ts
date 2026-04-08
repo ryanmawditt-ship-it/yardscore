@@ -170,10 +170,45 @@ Return ONLY a JSON object with exactly two keys:
       handbookProfiles: selectedProfiles,
     };
   } catch (error) {
-    // Claude call failed — fall back to deterministic selection with variety
-    console.error("[suburb-selector] Claude failed, using fallback:", error instanceof Error ? error.message : String(error));
+    // Claude call failed — use goal-specific fallback with variety
+    console.error("[suburb-selector] Claude failed, using goal-specific fallback:", error instanceof Error ? error.message : String(error));
 
     const goal = primaryGoal.toLowerCase();
+
+    // Goal-specific fallback sets for QLD (most common)
+    if (state === "QLD") {
+      const qldFallbacks: Record<string, string[][]> = {
+        yield: [
+          ["Bundaberg", "Toowoomba", "Rockhampton"],
+          ["Caboolture", "Beenleigh", "Kallangur"],
+          ["Gladstone", "Mackay", "Maryborough"],
+        ],
+        growth: [
+          ["Caboolture", "Narangba", "Griffin"],
+          ["North Lakes", "Morayfield", "Burpengary"],
+          ["Ripley", "Springfield", "Yarrabilba"],
+        ],
+        balanced: [
+          ["Redcliffe", "Ipswich", "North Lakes"],
+          ["Caboolture", "Narangba", "Redcliffe"],
+          ["Ipswich", "Bundaberg", "Toowoomba"],
+        ],
+      };
+      const key = goal.includes("yield") ? "yield" : goal.includes("growth") ? "growth" : "balanced";
+      const options = qldFallbacks[key];
+      // Rotate based on budget to add variety
+      const idx = Math.floor(maxBudget / 100000) % options.length;
+      const selected = options[idx];
+
+      return {
+        suburbs: selected,
+        reasoning: `Fallback selection: ${selected.join(", ")} for ${key} focus at $${maxBudget.toLocaleString()} budget.`,
+        picks: selected.map((s) => picks.find((p) => p.suburb === s)).filter((p): p is SuburbPick => p !== undefined),
+        handbookProfiles: [],
+      };
+    }
+
+    // Generic fallback for other states
     const sorted = [...picks].sort((a, b) => {
       if (goal.includes("yield")) return b.yieldScore - a.yieldScore;
       if (goal.includes("growth")) return b.growthScore - a.growthScore;
@@ -181,13 +216,9 @@ Return ONLY a JSON object with exactly two keys:
     });
 
     const top3 = sorted.slice(0, 3);
-    const fallbackReasoning = top3
-      .map((p) => `${p.suburb} (median $${p.medianHousePrice.toLocaleString()}, yield ${p.grossYield}%): ${p.rationale}`)
-      .join(" ");
-
     return {
       suburbs: top3.map((p) => p.suburb),
-      reasoning: fallbackReasoning,
+      reasoning: top3.map((p) => `${p.suburb}: ${p.rationale}`).join(" "),
       picks: top3,
       handbookProfiles: [],
     };

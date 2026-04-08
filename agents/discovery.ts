@@ -130,7 +130,7 @@ export async function discoverProperties(
   // 0. Try AllHomes (PRIMARY — confirmed working with real SSR HTML)
   const pc = postcode || getPostcodeForSuburb(suburb) || "";
   const allhomesListings = await scrapeAllHomesListings(suburb, state, pc, maxBudget, bedrooms, propertyType);
-  if (allhomesListings.length > 0) {
+  if (allhomesListings.length >= 2) {
     console.log(`[discovery] Got ${allhomesListings.length} REAL AllHomes listings for ${suburb}`);
     const selected = allhomesListings.slice(0, 3);
     for (const l of selected) {
@@ -145,6 +145,12 @@ export async function discoverProperties(
       });
     }
     return selected.map((l) => l.address);
+  }
+
+  if (allhomesListings.length === 1) {
+    console.log(`[discovery] ${suburb} only has 1 valid AllHomes listing — insufficient for analysis`);
+  } else if (allhomesListings.length === 0) {
+    console.log(`[discovery] ${suburb} returned 0 valid AllHomes listings (may be too expensive or wrong property type for budget)`);
   }
 
   // 1. Try Homely / View scrapers (backup)

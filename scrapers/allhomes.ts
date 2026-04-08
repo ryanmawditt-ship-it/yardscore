@@ -164,8 +164,30 @@ function extractListingsFromText(
     address = address.replace(/^.*?(?=\d+[A-Za-z]?(?:\/\d+)?\s+[A-Z])/i, "").trim();
     if (address.length < 5) continue;
 
-    // Budget filter: only eliminate if price is known and clearly over budget
-    if (price && price > maxBudget * 1.10) continue;
+    // Property type filter — extracted from the Bedrooms segment suffix
+    const detectedType = propType.toLowerCase();
+    const isApartmentType = ["apartment", "unit", "flat", "studio"].some((t) => detectedType.includes(t));
+    const isHouseType = ["house", "townhouse", "villa", "duplex", "singlefamilyresidence"].some((t) => detectedType.includes(t));
+
+    if (propertyType.toLowerCase() === "house" && isApartmentType) {
+      console.log(`[allhomes] Skipping apartment: ${address}`);
+      continue;
+    }
+
+    // Skip listings with no price — we cannot analyse without a price
+    if (!price) {
+      const hasPrice = priceDisplay.includes("$");
+      if (!hasPrice) {
+        console.log(`[allhomes] Skipping no-price listing: ${address} (${priceDisplay})`);
+        continue;
+      }
+    }
+
+    // Budget filter: eliminate if price exceeds budget + 5%
+    if (price && price > maxBudget * 1.05) {
+      console.log(`[allhomes] Skipping over-budget: ${address} ($${price.toLocaleString()} > $${maxBudget.toLocaleString()})`);
+      continue;
+    }
 
     const fullAddress = `${address}, ${suburb} ${state} ${postcode}`;
     if (listings.some((l) => l.address === fullAddress)) continue;
