@@ -121,25 +121,26 @@ export default function ResearchDashboard() {
   }, [adminKey])
 
   const runResearch = useCallback(async () => {
-    setLoading(true); setError(null); setProgressMsg('Research triggered — scanning feeds in background...')
+    setLoading(true); setError(null); setProgressMsg('Scanning suburb-specific feeds...')
     try {
-      // Fire the quick endpoint first for instant results
       const quickRes = await fetch('/api/research-quick', { method: 'POST', headers: { 'x-admin-key': adminKey, 'Content-Type': 'application/json' } })
       if (quickRes.ok) {
         const json = await quickRes.json()
-        setData(json)
-        setProgressMsg(`Quick scan done! ${json.summary.insightsExtracted} insights from ${json.summary.articlesFound} articles. ${json.summary.scoresUpdated ?? 0} suburb scores updated.`)
-        loadStoredData()
+        const articles = json.summary?.articlesFound ?? 0
+        const insights = json.summary?.insightsExtracted ?? 0
+        const scores = json.summary?.scoresUpdated ?? 0
+        setProgressMsg(`Done! ${insights} suburb insights from ${articles} articles. ${scores} scores updated.`)
+        // Refresh stored data from KV to show updated scores
+        await loadStoredData()
       } else {
-        // Quick endpoint also failed — just trigger schedule and don't wait
+        setProgressMsg('Quick scan failed. Triggering full research in background...')
         fetch('/api/research-update/schedule', { method: 'GET', headers: { 'x-admin-key': adminKey } }).catch(() => {})
-        setProgressMsg('Full research triggered in background. Results will appear in a few minutes — click Refresh to check.')
+        setProgressMsg('Full research running in background. Click Refresh in a few minutes.')
       }
       setTimeout(() => setProgressMsg(''), 10000)
-    } catch (e) {
-      // Network error — try schedule endpoint fire-and-forget
+    } catch {
       fetch('/api/research-update/schedule', { method: 'GET', headers: { 'x-admin-key': adminKey } }).catch(() => {})
-      setProgressMsg('Full research triggered in background. Results will appear in a few minutes — click Refresh to check.')
+      setProgressMsg('Full research running in background. Click Refresh in a few minutes.')
       setTimeout(() => setProgressMsg(''), 10000)
     } finally { setLoading(false) }
   }, [adminKey, loadStoredData])
