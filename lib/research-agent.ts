@@ -185,10 +185,21 @@ RISK SIGNALS:
 - Oversupply warnings from developers
 - Building company collapses affecting settlements`
 
+/** Filter out property listings and junk articles */
+function isListingOrJunk(title: string): boolean {
+  return /\d+\s+bedroom|\bopen for inspection\b|\bopen home\b|street,|avenue,|crescent,|drive,|road,|QLD\s+\d{4}|NSW\s+\d{4}|VIC\s+\d{4}|WA\s+\d{4}|SA\s+\d{4}|\bfor sale\b.*realestate\.com/i.test(title)
+}
+
 /** Sort articles by source priority and take the top N most relevant */
 function prioritiseArticles(items: FeedItem[], limit: number): FeedItem[] {
-  function getSourcePriority(source: string): number {
-    // Priority 1: Google News property-specific searches
+  // First filter out property listings (not investment intelligence)
+  const filtered = items.filter(item => !isListingOrJunk(item.title))
+
+  function getSourcePriority(item: FeedItem): number {
+    const source = item.source
+    // Priority 0: Suburb-specific Google News feeds (quoted suburb names in query)
+    if (source.includes('news.google.com') && source.includes('%22')) return 0
+    // Priority 1: Google News property searches (national)
     if (source.includes('news.google.com') && (
       source.includes('property') || source.includes('real+estate') ||
       source.includes('housing') || source.includes('infrastructure')
@@ -207,8 +218,18 @@ function prioritiseArticles(items: FeedItem[], limit: number): FeedItem[] {
     return 5
   }
 
-  return [...items]
-    .sort((a, b) => getSourcePriority(a.source) - getSourcePriority(b.source))
+  // Also boost articles that mention known suburbs in their title
+  function getSuburbBoost(item: FeedItem): number {
+    const detected = detectSuburbsInText(item.title)
+    return detected.length > 0 ? -1 : 0 // Lower number = higher priority
+  }
+
+  return [...filtered]
+    .sort((a, b) => {
+      const priA = getSourcePriority(a) + getSuburbBoost(a)
+      const priB = getSourcePriority(b) + getSuburbBoost(b)
+      return priA - priB
+    })
     .slice(0, limit)
 }
 
