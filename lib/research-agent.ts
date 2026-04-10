@@ -13,6 +13,7 @@ import { monitorCouncilDAs, type DAInsight } from '@/lib/council-da-monitor'
 import { analyzeNewsSentiment, type SentimentResult } from '@/lib/news-sentiment-analyzer'
 import { KnowledgeStore } from '@/lib/knowledge-store'
 import { scoreArticle, scoreSuburbFromArticle } from '@/lib/sentiment-lexicon'
+import { detectSuburbsInText, tagInsightWithSuburb } from '@/lib/suburb-detector'
 
 // ─────────────────────────────────────────────────────────────
 // TYPES
@@ -138,6 +139,9 @@ async function fetchAllFeeds(): Promise<{ items: FeedItem[]; scanned: number; su
 const EXTRACTION_SYSTEM_PROMPT =
   'You are an Australian property investment intelligence analyst. ' +
   'Extract actionable insights from news articles and data feeds. ' +
+  'CRITICAL: Every insight MUST have suburb and state populated — NEVER return null for these fields. ' +
+  'If a specific suburb is mentioned use it. If only a city is mentioned use the city name. ' +
+  'If only a state is mentioned use the state capital. If national news use "Australia" with state "AUS". ' +
   'Return ONLY a valid JSON array of insight objects. No markdown, no explanation.'
 
 const EXTRACTION_SIGNALS = `Pay special attention to these high-value signals:
@@ -271,13 +275,21 @@ ${EXTRACTION_SIGNALS}
 Articles:
 ${articlesText}
 
+CRITICAL: For EVERY insight you MUST identify a specific location:
+- If a suburb is named: use that suburb (e.g. "North Lakes", "QLD")
+- If only a city: use the city (e.g. "Brisbane", "QLD")
+- If a region: use the region (e.g. "Gold Coast", "QLD" or "Western Sydney", "NSW")
+- If only a state: use the state capital (e.g. "Sydney", "NSW")
+- If national news: use "Australia" with state "AUS"
+- NEVER return suburb: null or state: null
+
 Return a JSON array where each object has:
 {
   "title": "concise insight title",
   "summary": "2-3 sentence actionable summary for property investors",
   "source": "source URL",
-  "suburb": "affected suburb if identifiable, or null",
-  "state": "Australian state code (QLD/NSW/VIC/WA/SA/TAS/NT/ACT) or null",
+  "suburb": "REQUIRED - suburb, city, or region name",
+  "state": "REQUIRED - QLD/NSW/VIC/WA/SA/TAS/ACT/NT/AUS",
   "category": "infrastructure|policy|market_data|risk|economic|demographic|construction|rental|finance|council_da"
 }
 
@@ -286,7 +298,43 @@ Only include insights relevant to Australian property investment. Skip generic o
       const text = await askClaudeWithTimeout(EXTRACTION_SYSTEM_PROMPT, userContent, BATCH_TIMEOUT_MS)
       const parsed = JSON.parse(text)
       if (Array.isArray(parsed)) {
-        console.log(`[research] Batch ${batchNum}: extracted ${parsed.length} insights`)
+        // Tag any insights with null suburb/state using our suburb detector
+        const batchText = batch.map(item => `${item.title} ${item.description}`).join(' ')
+        let tagged = 0
+        for (const insight of parsed) {
+          if (!insight.suburb || !insight.state || insight.suburb === 'null' || insight.state === 'null') {
+            const articleText = insight.source
+              ? (batch.find(b => b.source === insight.source)?.title + ' ' + batch.find(b => b.source === insight.source)?.description) || batchText
+              : batchText
+            const result = tagInsightWithSuburb(insight, articleText)
+            insight.suburb = result.suburb
+            insight.state = result.state
+            if (insight.suburb) tagged++
+          }
+        }
+
+        // Also detect suburbs mentioned in batch articles that Claude missed
+        const detectedSuburbs = detectSuburbsInText(batchText)
+        const existingSuburbs = new Set(parsed.map((i: { suburb?: string }) => i.suburb?.toLowerCase()).filter(Boolean))
+        let autoCreated = 0
+
+        for (const { suburb, state, mentions } of detectedSuburbs.slice(0, 5)) {
+          if (existingSuburbs.has(suburb.toLowerCase())) continue
+          if (mentions < 2) continue // Only create insights for suburbs mentioned 2+ times
+
+          const articleScore = scoreArticle(batchText)
+          parsed.push({
+            title: `${suburb} mentioned in property news`,
+            summary: `${suburb}, ${state} was mentioned ${mentions} times in today's property research articles. Article sentiment: ${articleScore.sentiment} (${articleScore.normalisedScore}/10).`,
+            source: batch[0]?.source || '',
+            suburb,
+            state,
+            category: 'market_data',
+          })
+          autoCreated++
+        }
+
+        console.log(`[research] Batch ${batchNum}: ${parsed.length} insights (${tagged} suburb-tagged, ${autoCreated} auto-created)`)
         allInsights.push(...parsed)
       }
     } catch (e) {
