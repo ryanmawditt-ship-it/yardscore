@@ -6,13 +6,19 @@ import { KnowledgeStore } from '@/lib/knowledge-store'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-/** Vercel Cron hits this endpoint via GET */
+/** Vercel Cron hits this via GET, dashboard can also trigger it */
 export async function GET(request: NextRequest) {
-  // Verify cron secret (Vercel sends Authorization header for cron jobs)
   const authHeader = request.headers.get('authorization')
   const cronSecret = process.env.CRON_SECRET
+  const adminKey = process.env.ADMIN_KEY
+  const xAdminKey = request.headers.get('x-admin-key')
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  // Accept cron secret OR admin key
+  const authorized = (cronSecret && authHeader === `Bearer ${cronSecret}`) ||
+    (adminKey && xAdminKey === adminKey) ||
+    (adminKey && authHeader === `Bearer ${adminKey}`)
+
+  if (!authorized) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

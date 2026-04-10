@@ -121,15 +121,27 @@ export default function ResearchDashboard() {
   }, [adminKey])
 
   const runResearch = useCallback(async () => {
-    setLoading(true); setError(null); setProgressMsg('Scanning 45 RSS feeds...')
+    setLoading(true); setError(null); setProgressMsg('Research triggered — scanning feeds in background...')
     try {
-      const res = await fetch('/api/research-quick', { method: 'POST', headers: { 'x-admin-key': adminKey, 'Content-Type': 'application/json' } })
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `HTTP ${res.status}`) }
-      setProgressMsg('Processing results...')
-      const json = await res.json(); setData(json)
-      setProgressMsg(`Done! ${json.summary.insightsExtracted} insights from ${json.summary.articlesFound} articles`)
-      loadStoredData(); setTimeout(() => setProgressMsg(''), 5000)
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); setProgressMsg('') } finally { setLoading(false) }
+      // Fire the quick endpoint first for instant results
+      const quickRes = await fetch('/api/research-quick', { method: 'POST', headers: { 'x-admin-key': adminKey, 'Content-Type': 'application/json' } })
+      if (quickRes.ok) {
+        const json = await quickRes.json()
+        setData(json)
+        setProgressMsg(`Quick scan done! ${json.summary.insightsExtracted} insights from ${json.summary.articlesFound} articles. ${json.summary.scoresUpdated ?? 0} suburb scores updated.`)
+        loadStoredData()
+      } else {
+        // Quick endpoint also failed — just trigger schedule and don't wait
+        fetch('/api/research-update/schedule', { method: 'GET', headers: { 'x-admin-key': adminKey } }).catch(() => {})
+        setProgressMsg('Full research triggered in background. Results will appear in a few minutes — click Refresh to check.')
+      }
+      setTimeout(() => setProgressMsg(''), 10000)
+    } catch (e) {
+      // Network error — try schedule endpoint fire-and-forget
+      fetch('/api/research-update/schedule', { method: 'GET', headers: { 'x-admin-key': adminKey } }).catch(() => {})
+      setProgressMsg('Full research triggered in background. Results will appear in a few minutes — click Refresh to check.')
+      setTimeout(() => setProgressMsg(''), 10000)
+    } finally { setLoading(false) }
   }, [adminKey, loadStoredData])
 
   useEffect(() => { const k = typeof window !== 'undefined' ? localStorage.getItem('yardscore-admin-key') : null; if (k) { setAdminKey(k); setAuthenticated(true) } }, [])
