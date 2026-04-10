@@ -243,141 +243,153 @@ async function askClaudeWithTimeout(system: string, user: string, timeoutMs: num
   ])
 }
 
-const BATCH_SIZE = 5
-const MAX_ARTICLES = 30
+const CLAUDE_BATCH_SIZE = 5
+const CLAUDE_MAX_ARTICLES = 30
 const BATCH_TIMEOUT_MS = 45_000
 const BATCH_DELAY_MS = 2_000
 
-async function extractIntelligence(items: FeedItem[]): Promise<Array<{
+type RawInsight = {
   title: string
   summary: string
   source: string
   suburb?: string
   state?: string
   category: string
-}>> {
-  if (items.length === 0) return []
+}
 
-  // Prioritise and limit articles
-  const prioritised = prioritiseArticles(items, MAX_ARTICLES)
-  const totalBatches = Math.ceil(prioritised.length / BATCH_SIZE)
-  console.log(`[research] Processing ${prioritised.length} priority articles in ${totalBatches} batches of ${BATCH_SIZE}`)
+// ─────────────────────────────────────────────────────────────
+// STEP A: Scan ALL articles with lexicon + suburb detector (free, instant)
+// Creates basic insights for every article that mentions a known suburb.
+// ─────────────────────────────────────────────────────────────
 
-  const allInsights: Array<{
-    title: string
-    summary: string
-    source: string
-    suburb?: string
-    state?: string
-    category: string
-  }> = []
+function scanAllArticlesForSuburbs(items: FeedItem[]): {
+  suburbInsights: RawInsight[]
+  suburbArticles: FeedItem[] // articles that mention suburbs (for Claude)
+} {
+  const suburbInsights: RawInsight[] = []
+  const suburbArticles: FeedItem[] = []
+  const seenTitles = new Set<string>()
 
-  for (let i = 0; i < prioritised.length; i += BATCH_SIZE) {
-    const batchNum = Math.floor(i / BATCH_SIZE) + 1
-    const batch = prioritised.slice(i, i + BATCH_SIZE)
-    console.log(`[research] Processing batch ${batchNum} of ${totalBatches} (${batch.length} articles)`)
+  for (const item of items) {
+    if (isListingOrJunk(item.title)) continue
+
+    const articleText = `${item.title} ${item.description}`
+    const detected = detectSuburbsInText(articleText)
+
+    if (detected.length === 0) continue // No suburb mentioned — skip
+
+    // This article mentions suburbs — mark it for potential Claude processing
+    if (!seenTitles.has(item.title)) {
+      seenTitles.add(item.title)
+      suburbArticles.push(item)
+    }
+
+    // Create a basic insight for each suburb detected (no Claude needed)
+    const lexScore = scoreArticle(articleText)
+    for (const { suburb, state, mentions } of detected.slice(0, 3)) {
+      suburbInsights.push({
+        title: `${suburb}: ${item.title.slice(0, 70)}`,
+        summary: `${suburb}, ${state} mentioned ${mentions}x. Sentiment: ${lexScore.sentiment} (${lexScore.normalisedScore}/10). Signals: ${lexScore.topSignals.slice(0, 3).join(', ') || 'none'}.`,
+        source: item.link || item.source,
+        suburb,
+        state,
+        category: lexScore.infrastructureSignals.length > 0 ? 'infrastructure'
+          : lexScore.rentalSignals.length > 0 ? 'rental'
+          : lexScore.policySignals.length > 0 ? 'policy'
+          : 'market_data',
+      })
+    }
+  }
+
+  return { suburbInsights, suburbArticles }
+}
+
+// ─────────────────────────────────────────────────────────────
+// STEP B: Send top 30 suburb-specific articles to Claude for deep analysis
+// ─────────────────────────────────────────────────────────────
+
+async function extractDeepInsights(suburbArticles: FeedItem[]): Promise<RawInsight[]> {
+  // Pick the 30 most important suburb-specific articles
+  const prioritised = prioritiseArticles(suburbArticles, CLAUDE_MAX_ARTICLES)
+  if (prioritised.length === 0) return []
+
+  const totalBatches = Math.ceil(prioritised.length / CLAUDE_BATCH_SIZE)
+  console.log(`[research] Sending ${prioritised.length} suburb-specific articles to Claude in ${totalBatches} batches`)
+
+  const allInsights: RawInsight[] = []
+
+  for (let i = 0; i < prioritised.length; i += CLAUDE_BATCH_SIZE) {
+    const batchNum = Math.floor(i / CLAUDE_BATCH_SIZE) + 1
+    const batch = prioritised.slice(i, i + CLAUDE_BATCH_SIZE)
+    console.log(`[research] Claude batch ${batchNum}/${totalBatches} (${batch.length} articles)`)
 
     try {
-      // Pre-score each article with the sentiment lexicon
       const articlesText = batch.map((item, idx) => {
         const articleText = `${item.title} ${item.description}`
-        const lexiconScore = scoreArticle(articleText)
-        const signals = lexiconScore.topSignals.length > 0
-          ? `\nPre-scored: ${lexiconScore.sentiment} (${lexiconScore.normalisedScore}/10). Signals: ${lexiconScore.topSignals.join(', ')}`
+        const lexScore = scoreArticle(articleText)
+        const detected = detectSuburbsInText(articleText)
+        const suburbHint = detected.length > 0 ? `\nSuburbs detected: ${detected.map(d => d.suburb + ', ' + d.state).join('; ')}` : ''
+        const signals = lexScore.topSignals.length > 0
+          ? `\nLexicon: ${lexScore.sentiment} (${lexScore.normalisedScore}/10). Signals: ${lexScore.topSignals.join(', ')}`
           : ''
-        return `[${idx + 1}] ${item.title}\n${item.description}\nSource: ${item.source}${signals}`
+        return `[${idx + 1}] ${item.title}\n${item.description}${suburbHint}${signals}`
       }).join('\n\n')
 
-      const userContent = `Extract property investment intelligence from these articles.
-Each article has been pre-scored by our sentiment lexicon — use those scores to inform your analysis.
+      const userContent = `Extract suburb-specific property investment intelligence.
 
 ${EXTRACTION_SIGNALS}
 
 Articles:
 ${articlesText}
 
-CRITICAL: For EVERY insight you MUST identify a specific location:
-- If a suburb is named: use that suburb (e.g. "North Lakes", "QLD")
-- If only a city: use the city (e.g. "Brisbane", "QLD")
-- If a region: use the region (e.g. "Gold Coast", "QLD" or "Western Sydney", "NSW")
-- If only a state: use the state capital (e.g. "Sydney", "NSW")
-- If national news: use "Australia" with state "AUS"
-- NEVER return suburb: null or state: null
+RULES:
+- ONLY create insights for SPECIFIC suburbs or cities — never "Australia" or state names
+- Each insight must name a real suburb, city, or region
+- If an article is about national trends with no specific location, SKIP IT
+- suburb must be a place name like "Ipswich", "North Lakes", "Brisbane" — NEVER "Australia", "Queensland", "National"
 
-Return a JSON array where each object has:
-{
-  "title": "concise insight title",
-  "summary": "2-3 sentence actionable summary for property investors",
+Return a JSON array:
+[{
+  "title": "concise insight title mentioning the suburb",
+  "summary": "2-3 sentence summary specific to this suburb",
   "source": "source URL",
-  "suburb": "REQUIRED - suburb, city, or region name",
-  "state": "REQUIRED - QLD/NSW/VIC/WA/SA/TAS/ACT/NT/AUS",
+  "suburb": "specific suburb or city name",
+  "state": "QLD/NSW/VIC/WA/SA/TAS/ACT/NT",
   "category": "infrastructure|policy|market_data|risk|economic|demographic|construction|rental|finance|council_da"
-}
-
-Only include insights relevant to Australian property investment. Skip generic or irrelevant articles.`
+}]`
 
       const text = await askClaudeWithTimeout(EXTRACTION_SYSTEM_PROMPT, userContent, BATCH_TIMEOUT_MS)
       const parsed = JSON.parse(text)
       if (Array.isArray(parsed)) {
-        let tagged = 0
-        let autoCreated = 0
-
-        // Tag each insight using the INDIVIDUAL article it came from (by title match)
+        // Tag any remaining nulls and filter out "Australia"
         for (const insight of parsed) {
-          if (!insight.suburb || !insight.state || insight.suburb === 'null' || insight.state === 'null') {
-            // Find the specific article this insight came from by matching title words
-            const insightTitle = (insight.title || '').toLowerCase()
-            const matchedArticle = batch.find(b =>
-              insightTitle.split(' ').filter((w: string) => w.length > 4).some((w: string) =>
-                b.title.toLowerCase().includes(w) || b.description.toLowerCase().includes(w)
-              )
+          if (!insight.suburb || !insight.state || insight.suburb === 'null') {
+            const matched = batch.find(b =>
+              (insight.title || '').toLowerCase().split(' ').filter((w: string) => w.length > 4)
+                .some((w: string) => b.title.toLowerCase().includes(w))
             )
-            const articleText = matchedArticle
-              ? `${matchedArticle.title} ${matchedArticle.description}`
-              : `${insight.title} ${insight.summary}`
-
-            const result = tagInsightWithSuburb(insight, articleText)
-            insight.suburb = result.suburb
-            insight.state = result.state
-            if (insight.suburb && insight.suburb !== 'Australia') tagged++
+            if (matched) {
+              const result = tagInsightWithSuburb(insight, `${matched.title} ${matched.description}`)
+              insight.suburb = result.suburb
+              insight.state = result.state
+            }
           }
         }
 
-        // Also scan EACH article individually for suburb mentions (not combined batch)
-        const existingSuburbs = new Set(
-          parsed.map((ins: { suburb?: string }) => ins.suburb?.toLowerCase()).filter(Boolean)
+        const suburbOnly = parsed.filter((ins: RawInsight) =>
+          ins.suburb && ins.state &&
+          ins.suburb !== 'Australia' && ins.state !== 'AUS' &&
+          ins.suburb !== 'National'
         )
 
-        for (const item of batch) {
-          const articleText = `${item.title} ${item.description}`
-          const detectedSuburbs = detectSuburbsInText(articleText)
-
-          for (const { suburb, state, mentions } of detectedSuburbs.slice(0, 3)) {
-            if (existingSuburbs.has(suburb.toLowerCase())) continue
-
-            const articleScore = scoreArticle(articleText)
-            parsed.push({
-              title: `${suburb} in property news`,
-              summary: `${suburb}, ${state} mentioned in: ${item.title.slice(0, 80)}. Sentiment: ${articleScore.sentiment} (${articleScore.normalisedScore}/10).`,
-              source: item.link || item.source,
-              suburb,
-              state,
-              category: 'market_data',
-            })
-            existingSuburbs.add(suburb.toLowerCase())
-            autoCreated++
-          }
-        }
-
-        console.log(`[research] Batch ${batchNum}: ${parsed.length} insights (${tagged} suburb-tagged, ${autoCreated} auto-created)`)
-        allInsights.push(...parsed)
+        console.log(`[research] Claude batch ${batchNum}: ${suburbOnly.length} suburb insights (filtered ${parsed.length - suburbOnly.length} non-suburb)`)
+        allInsights.push(...suburbOnly)
       }
     } catch (e) {
-      console.error(`[research] Batch ${batchNum} failed:`, e instanceof Error ? e.message : String(e))
+      console.error(`[research] Claude batch ${batchNum} failed:`, e instanceof Error ? e.message : String(e))
     }
 
-    // Delay between batches to avoid rate limits
-    if (i + BATCH_SIZE < prioritised.length) {
+    if (i + CLAUDE_BATCH_SIZE < prioritised.length) {
       await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
     }
   }
@@ -537,35 +549,49 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
   const { items: allItems, scanned, successful } = await fetchAllFeeds()
   console.log(`[research] Fetched ${allItems.length} articles from ${successful}/${scanned} feeds`)
 
-  // Step 2: Council DA monitoring (parallel with intelligence extraction)
-  console.log('[research] Step 2: Extracting intelligence + monitoring council DAs...')
-  const [daInsights, rawInsights] = await Promise.all([
-    monitorCouncilDAs(),
-    extractIntelligence(allItems),
-  ])
-  console.log(`[research] Scanned ${daInsights.length} council DA portals`)
-  console.log(`[research] Extracted ${rawInsights.length} raw insights from ${Math.min(allItems.length, MAX_ARTICLES)} priority articles`)
+  // Step 2: Lexicon scan ALL articles + suburb detection (instant, free)
+  console.log('[research] Step 2: Scanning ALL articles for suburbs + lexicon scoring...')
+  const { suburbInsights: lexiconInsights, suburbArticles } = scanAllArticlesForSuburbs(allItems)
+  console.log(`[research] Lexicon scan: ${lexiconInsights.length} suburb insights from ${suburbArticles.length} suburb-mentioning articles (out of ${allItems.length} total)`)
 
-  // Step 3: News sentiment analysis (lexicon-powered — scans ALL articles, no API calls)
-  console.log('[research] Step 3: Analyzing news sentiment via lexicon...')
+  // Step 3: Send top 30 suburb-specific articles to Claude + monitor council DAs
+  console.log('[research] Step 3: Claude deep extraction + council DA monitoring...')
+  const [daInsights, claudeInsights] = await Promise.all([
+    monitorCouncilDAs(),
+    extractDeepInsights(suburbArticles),
+  ])
+  console.log(`[research] Claude extracted ${claudeInsights.length} deep insights`)
+  console.log(`[research] Scanned ${daInsights.length} council DA portals`)
+
+  // Step 4: News sentiment analysis (lexicon-powered — scans ALL articles)
+  console.log('[research] Step 4: Analyzing news sentiment via lexicon...')
   const allArticleTexts = allItems.map(item => `${item.title}\n${item.description}`)
   const sentiment = await analyzeNewsSentiment(allArticleTexts)
   console.log(`[research] Sentiment: ${sentiment.overallSentiment} (${sentiment.sentimentScore}). ${sentiment.articlesScored} articles scored, avg ${sentiment.avgArticleScore}/10`)
-  console.log(`[research] Top bullish: ${sentiment.bullishSignals.slice(0, 3).join(', ')}`)
-  console.log(`[research] Top bearish: ${sentiment.bearishSignals.slice(0, 3).join(', ')}`)
 
-  // Step 4: Classify and rank all insights
-  console.log('[research] Step 4: Classifying insights...')
-  const classifiedInsights = classifyAndRank(rawInsights)
-  console.log(`[research] Classified ${classifiedInsights.length} insights`)
+  // Step 5: Merge all insights, filter out "Australia"/"AUS", classify
+  console.log('[research] Step 5: Merging and classifying insights...')
+  const allRawInsights = [...claudeInsights, ...lexiconInsights]
+    .filter(i => i.suburb && i.state && i.suburb !== 'Australia' && i.state !== 'AUS' && i.suburb !== 'National')
 
-  // Step 5: Persist to knowledge store (KV)
-  console.log('[research] Step 5: Persisting to knowledge store...')
+  // Deduplicate by suburb+title
+  const seen = new Set<string>()
+  const deduped = allRawInsights.filter(i => {
+    const key = `${(i.suburb || '').toLowerCase()}|${(i.title || '').slice(0, 40).toLowerCase()}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+
+  const classifiedInsights = classifyAndRank(deduped)
+  console.log(`[research] ${classifiedInsights.length} unique suburb insights (${claudeInsights.length} from Claude, ${lexiconInsights.length} from lexicon, ${allRawInsights.length - deduped.length} duplicates removed)`)
+
+  // Step 6: Persist to knowledge store (KV)
+  console.log('[research] Step 6: Persisting to knowledge store...')
   let savedCount = 0
   let mentionCount = 0
   for (const insight of classifiedInsights) {
     await KnowledgeStore.saveInsight(insight as unknown as Record<string, unknown>)
-    // Save infrastructure-category insights as infrastructure alerts too
     if (insight.category === 'infrastructure') {
       await KnowledgeStore.saveInfrastructureAlert({
         project: insight.title,
@@ -576,22 +602,20 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
         source: insight.source,
       })
     }
-    // Track suburb mentions for trending
     if (insight.suburb && insight.state) {
       await KnowledgeStore.incrementSuburbMention(insight.suburb, insight.state)
       mentionCount++
     }
     savedCount++
   }
-  // Persist sentiment
   await KnowledgeStore.saveSentiment(sentiment as unknown as Record<string, unknown>)
 
-  // Step 6: Update suburb scores from today's insights (fast, no Claude call)
-  console.log('[research] Step 6: Updating suburb scores from today\'s insights...')
+  // Step 7: Update suburb scores from ALL suburb insights (lexicon dimension scoring)
+  console.log('[research] Step 7: Updating suburb scores from today\'s insights...')
   await updateSuburbScoresFromInsights(classifiedInsights, sentiment)
 
-  // Step 7: Seed scores for any handbook suburbs not yet scored
-  console.log('[research] Step 7: Seeding missing suburb scores from handbook...')
+  // Step 8: Seed scores for any handbook suburbs not yet scored
+  console.log('[research] Step 8: Seeding missing suburb scores from handbook...')
   await seedMissingSuburbScores(sentiment)
 
   const kvStats = await KnowledgeStore.getStats()

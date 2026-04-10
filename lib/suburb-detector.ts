@@ -172,15 +172,15 @@ export function tagInsightWithSuburb(
     }
   }
 
-  // Last resort: detect state/country from text
+  // Last resort: detect state from text and use the capital city
+  // We NEVER tag as "Australia" — only real suburbs/cities
   const statePatterns: Array<{ pattern: RegExp; state: string; suburb: string }> = [
-    { pattern: /\bqueensland\b|\bbrisbane\b|\bqld\b/i, state: 'QLD', suburb: 'Queensland' },
-    { pattern: /\bnew south wales\b|\bsydney\b|\bnsw\b/i, state: 'NSW', suburb: 'New South Wales' },
-    { pattern: /\bvictoria\b|\bmelbourne\b/i, state: 'VIC', suburb: 'Victoria' },
-    { pattern: /\bwestern australia\b|\bperth\b/i, state: 'WA', suburb: 'Western Australia' },
-    { pattern: /\bsouth australia\b|\badelaide\b/i, state: 'SA', suburb: 'South Australia' },
-    { pattern: /\btasmania\b|\bhobart\b/i, state: 'TAS', suburb: 'Tasmania' },
-    { pattern: /\baustralia\b|\bnational\b|\bacross the country\b/i, state: 'AUS', suburb: 'Australia' },
+    { pattern: /\bqueensland\b|\bqld\b/i, state: 'QLD', suburb: 'Brisbane' },
+    { pattern: /\bnew south wales\b|\bnsw\b/i, state: 'NSW', suburb: 'Sydney' },
+    { pattern: /\bvictoria\b|\bvic\b/i, state: 'VIC', suburb: 'Melbourne' },
+    { pattern: /\bwestern australia\b/i, state: 'WA', suburb: 'Perth' },
+    { pattern: /\bsouth australia\b/i, state: 'SA', suburb: 'Adelaide' },
+    { pattern: /\btasmania\b/i, state: 'TAS', suburb: 'Hobart' },
   ]
 
   for (const { pattern, state, suburb } of statePatterns) {
@@ -189,5 +189,6 @@ export function tagInsightWithSuburb(
     }
   }
 
+  // No location found at all — return untagged (will be filtered out)
   return insight
 }
