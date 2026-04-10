@@ -20,8 +20,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    console.log('[api/research-update] Starting research cycle...')
-    const result = await runFullResearchCycle()
+    // Manual triggers use fewer feeds to avoid 504 timeout
+    const isManual = request.headers.get('x-trigger') === 'manual'
+    const maxFeeds = isManual ? 60 : undefined // cron: all feeds, manual: 60
+    console.log(`[api/research-update] Starting ${isManual ? 'manual' : 'cron'} research cycle...`)
+    const result = await runFullResearchCycle({ maxFeeds })
 
     // Cache results in-memory for use by suburb-selector and synthesis agents
     setResearchCache({

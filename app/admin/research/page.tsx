@@ -123,7 +123,7 @@ export default function ResearchDashboard() {
   const runResearch = useCallback(async () => {
     setLoading(true); setError(null); setProgressMsg('Scanning 45 RSS feeds...')
     try {
-      const res = await fetch('/api/research-update', { method: 'POST', headers: { 'x-admin-key': adminKey, 'Content-Type': 'application/json' } })
+      const res = await fetch('/api/research-update', { method: 'POST', headers: { 'x-admin-key': adminKey, 'x-trigger': 'manual', 'Content-Type': 'application/json' } })
       if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `HTTP ${res.status}`) }
       setProgressMsg('Processing results...')
       const json = await res.json(); setData(json)

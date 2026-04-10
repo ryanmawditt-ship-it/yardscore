@@ -115,8 +115,15 @@ async function fetchFeed(url: string): Promise<FeedItem[]> {
   }
 }
 
-async function fetchAllFeeds(): Promise<{ items: FeedItem[]; scanned: number; successful: number }> {
-  const urls = getAllFeedUrls()
+async function fetchAllFeeds(maxFeeds?: number): Promise<{ items: FeedItem[]; scanned: number; successful: number }> {
+  let urls = getAllFeedUrls()
+  if (maxFeeds && maxFeeds < urls.length) {
+    // For manual runs: take a representative sample prioritising suburb-specific feeds
+    const suburbFeeds = urls.filter(u => u.includes('%22'))
+    const otherFeeds = urls.filter(u => !u.includes('%22'))
+    urls = [...suburbFeeds.slice(0, Math.floor(maxFeeds * 0.7)), ...otherFeeds.slice(0, Math.floor(maxFeeds * 0.3))]
+    console.log(`[research] Limited to ${urls.length} feeds (${suburbFeeds.slice(0, Math.floor(maxFeeds * 0.7)).length} suburb-specific)`)
+  }
   const results = await Promise.allSettled(urls.map(url => fetchFeed(url)))
 
   const allItems: FeedItem[] = []
@@ -403,34 +410,39 @@ Return a JSON array:
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Update suburb scores using dimension-aware lexicon scoring.
- * Each article is run through the full lexicon — flood terms hit riskScore,
- * train station terms hit infraScore, rental terms hit yieldScore, etc.
+ * Update suburb scores by scanning RAW article texts through the dimension-aware lexicon.
+ * Uses the full article title+description (not Claude's short summary) so the lexicon
+ * can detect flood/infrastructure/rental/growth signals properly.
  */
-async function updateSuburbScoresFromInsights(
-  insights: ClassifiedInsight[],
-  _sentiment: SentimentResult,
-): Promise<void> {
-  // Group insights by suburb
-  const suburbMap = new Map<string, ClassifiedInsight[]>()
-  for (const i of insights) {
-    if (!i.suburb || !i.state) continue
-    const key = `${i.suburb}|${i.state}`
-    if (!suburbMap.has(key)) suburbMap.set(key, [])
-    suburbMap.get(key)!.push(i)
+async function updateSuburbScoresFromArticles(allItems: FeedItem[]): Promise<void> {
+  // Group articles by which suburb they mention
+  const suburbArticleMap = new Map<string, string[]>()
+
+  for (const item of allItems) {
+    if (isListingOrJunk(item.title)) continue
+    const articleText = `${item.title} ${item.description}`
+    const detected = detectSuburbsInText(articleText)
+
+    for (const { suburb, state } of detected.slice(0, 3)) {
+      if (suburb === 'Australia' || state === 'AUS') continue
+      const key = `${suburb}|${state}`
+      if (!suburbArticleMap.has(key)) suburbArticleMap.set(key, [])
+      suburbArticleMap.get(key)!.push(articleText)
+    }
   }
 
-  if (suburbMap.size === 0) {
-    console.log('[research] No suburb-specific insights to update scores')
+  if (suburbArticleMap.size === 0) {
+    console.log('[research] No suburb-specific articles found for scoring')
     return
   }
 
+  console.log(`[research] Found ${suburbArticleMap.size} suburbs mentioned in articles`)
+
   let updated = 0
   let totalSignals = 0
-  for (const [key, articles] of Array.from(suburbMap.entries())) {
+  for (const [key, articles] of Array.from(suburbArticleMap.entries())) {
     const [suburb, state] = key.split('|')
 
-    // Get existing score or start from neutral baseline
     const existing = await KnowledgeStore.getSuburbScore(suburb, state)
     let currentScores = {
       riskScore: (existing?.riskScore as number) ?? 5,
@@ -443,11 +455,9 @@ async function updateSuburbScoresFromInsights(
 
     const allSignals: Array<{ dimension: string; term: string; impact: number; direction: string }> = []
 
-    // Run each article through the dimension-aware lexicon scorer
-    for (const article of articles) {
-      const articleText = `${article.title}. ${article.summary}`
+    // Score up to 10 articles per suburb through the dimension-aware lexicon
+    for (const articleText of articles.slice(0, 10)) {
       const result = scoreSuburbFromArticle(articleText, suburb, state, currentScores)
-
       currentScores = {
         riskScore: result.riskScore,
         infrastructureScore: result.infrastructureScore,
@@ -459,15 +469,12 @@ async function updateSuburbScoresFromInsights(
       allSignals.push(...result.signalsFound)
     }
 
-    // Only save if signals were found
     if (allSignals.length > 0) {
-      // Build key reasons from the top signals that hit each dimension
       const keyReasons = allSignals
         .sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact))
         .slice(0, 5)
-        .map(s => `${s.term} → ${s.dimension} ${s.direction === 'positive' ? '+' : ''}${s.impact}`)
+        .map(s => `${s.term} → ${s.dimension} ${s.direction === 'positive' ? ' ↑' : ' ↓'}`)
 
-      // Keep existing reasons too
       const existingReasons = (existing?.keyReasons as string[]) || []
       const mergedReasons = [...keyReasons, ...existingReasons.slice(0, 3)].slice(0, 8)
 
@@ -479,12 +486,12 @@ async function updateSuburbScoresFromInsights(
       })
 
       totalSignals += allSignals.length
-      console.log(`[scoring] ${suburb}, ${state}: ${allSignals.length} signals → risk:${currentScores.riskScore} infra:${currentScores.infrastructureScore} yield:${currentScores.yieldScore} growth:${currentScores.growthScore} overall:${currentScores.overallScore}`)
+      console.log(`[scoring] ${suburb}, ${state}: ${allSignals.length} signals from ${articles.length} articles → overall:${currentScores.overallScore}`)
       updated++
     }
   }
 
-  console.log(`[research] Updated ${updated} suburbs with ${totalSignals} dimension-specific signals`)
+  console.log(`[research] Updated ${updated} suburb scores with ${totalSignals} dimension-specific signals`)
 }
 
 /**
@@ -540,13 +547,13 @@ async function seedMissingSuburbScores(sentiment: SentimentResult): Promise<void
 // FULL RESEARCH CYCLE
 // ─────────────────────────────────────────────────────────────
 
-export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
+export async function runFullResearchCycle(options?: { maxFeeds?: number }): Promise<ResearchCycleResult> {
   const startTime = Date.now()
   console.log(`[research] Starting full research cycle — ${getSourceCount()} sources configured`)
 
-  // Step 1: Fetch all RSS feeds
+  // Step 1: Fetch RSS feeds (limited for manual runs)
   console.log('[research] Step 1: Fetching RSS feeds...')
-  const { items: allItems, scanned, successful } = await fetchAllFeeds()
+  const { items: allItems, scanned, successful } = await fetchAllFeeds(options?.maxFeeds)
   console.log(`[research] Fetched ${allItems.length} articles from ${successful}/${scanned} feeds`)
 
   // Step 2: Lexicon scan ALL articles + suburb detection (instant, free)
@@ -610,9 +617,9 @@ export async function runFullResearchCycle(): Promise<ResearchCycleResult> {
   }
   await KnowledgeStore.saveSentiment(sentiment as unknown as Record<string, unknown>)
 
-  // Step 7: Update suburb scores from ALL suburb insights (lexicon dimension scoring)
-  console.log('[research] Step 7: Updating suburb scores from today\'s insights...')
-  await updateSuburbScoresFromInsights(classifiedInsights, sentiment)
+  // Step 7: Update suburb scores from RAW article texts (not just insight summaries)
+  console.log('[research] Step 7: Updating suburb scores from article texts...')
+  await updateSuburbScoresFromArticles(allItems)
 
   // Step 8: Seed scores for any handbook suburbs not yet scored
   console.log('[research] Step 8: Seeding missing suburb scores from handbook...')
