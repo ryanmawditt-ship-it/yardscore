@@ -547,11 +547,12 @@ async function seedMissingSuburbScores(sentiment: SentimentResult): Promise<void
 // FULL RESEARCH CYCLE
 // ─────────────────────────────────────────────────────────────
 
-export async function runFullResearchCycle(options?: { maxFeeds?: number }): Promise<ResearchCycleResult> {
+export async function runFullResearchCycle(options?: { maxFeeds?: number; quick?: boolean }): Promise<ResearchCycleResult> {
+  const isQuick = options?.quick ?? false
   const startTime = Date.now()
-  console.log(`[research] Starting full research cycle — ${getSourceCount()} sources configured`)
+  console.log(`[research] Starting ${isQuick ? 'QUICK' : 'FULL'} research cycle — ${getSourceCount()} sources configured`)
 
-  // Step 1: Fetch RSS feeds (limited for manual runs)
+  // Step 1: Fetch RSS feeds (limited for manual/quick runs)
   console.log('[research] Step 1: Fetching RSS feeds...')
   const { items: allItems, scanned, successful } = await fetchAllFeeds(options?.maxFeeds)
   console.log(`[research] Fetched ${allItems.length} articles from ${successful}/${scanned} feeds`)
@@ -561,14 +562,23 @@ export async function runFullResearchCycle(options?: { maxFeeds?: number }): Pro
   const { suburbInsights: lexiconInsights, suburbArticles } = scanAllArticlesForSuburbs(allItems)
   console.log(`[research] Lexicon scan: ${lexiconInsights.length} suburb insights from ${suburbArticles.length} suburb-mentioning articles (out of ${allItems.length} total)`)
 
-  // Step 3: Send top 30 suburb-specific articles to Claude + monitor council DAs
-  console.log('[research] Step 3: Claude deep extraction + council DA monitoring...')
-  const [daInsights, claudeInsights] = await Promise.all([
-    monitorCouncilDAs(),
-    extractDeepInsights(suburbArticles),
-  ])
-  console.log(`[research] Claude extracted ${claudeInsights.length} deep insights`)
-  console.log(`[research] Scanned ${daInsights.length} council DA portals`)
+  // Step 3: Claude deep extraction (skip for quick runs) + council DA monitoring
+  let claudeInsights: RawInsight[] = []
+  let daInsights: DAInsight[] = []
+  if (isQuick) {
+    // Quick mode: skip Claude and council DAs to save time
+    console.log('[research] Step 3: SKIPPED Claude + council DAs (quick mode — lexicon insights only)')
+  } else {
+    console.log('[research] Step 3: Claude deep extraction + council DA monitoring...')
+    const results = await Promise.all([
+      monitorCouncilDAs(),
+      extractDeepInsights(suburbArticles),
+    ])
+    daInsights = results[0]
+    claudeInsights = results[1]
+    console.log(`[research] Claude extracted ${claudeInsights.length} deep insights`)
+    console.log(`[research] Scanned ${daInsights.length} council DA portals`)
+  }
 
   // Step 4: News sentiment analysis (lexicon-powered — scans ALL articles)
   console.log('[research] Step 4: Analyzing news sentiment via lexicon...')

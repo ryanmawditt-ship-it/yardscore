@@ -20,11 +20,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Manual triggers use fewer feeds to avoid 504 timeout
+    // Manual triggers: fewer feeds, skip Claude (lexicon-only) to avoid 504
     const isManual = request.headers.get('x-trigger') === 'manual'
-    const maxFeeds = isManual ? 60 : undefined // cron: all feeds, manual: 60
-    console.log(`[api/research-update] Starting ${isManual ? 'manual' : 'cron'} research cycle...`)
-    const result = await runFullResearchCycle({ maxFeeds })
+    console.log(`[api/research-update] Starting ${isManual ? 'QUICK manual' : 'FULL cron'} research cycle...`)
+    const result = await runFullResearchCycle({
+      maxFeeds: isManual ? 50 : undefined,
+      quick: isManual,
+    })
 
     // Cache results in-memory for use by suburb-selector and synthesis agents
     setResearchCache({
