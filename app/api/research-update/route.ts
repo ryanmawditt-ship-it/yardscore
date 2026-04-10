@@ -20,11 +20,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Manual triggers: fewer feeds, skip Claude (lexicon-only) to avoid 504
+    // Manual triggers: minimal feeds, skip Claude to fit in 60s Hobby plan limit
     const isManual = request.headers.get('x-trigger') === 'manual'
     console.log(`[api/research-update] Starting ${isManual ? 'QUICK manual' : 'FULL cron'} research cycle...`)
     const result = await runFullResearchCycle({
-      maxFeeds: isManual ? 50 : undefined,
+      maxFeeds: isManual ? 15 : undefined,
       quick: isManual,
     })
 

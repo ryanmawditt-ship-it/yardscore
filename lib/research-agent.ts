@@ -99,10 +99,10 @@ function parseRssFeed(xml: string, sourceUrl: string): FeedItem[] {
 // FETCH ALL FEEDS
 // ─────────────────────────────────────────────────────────────
 
-async function fetchFeed(url: string): Promise<FeedItem[]> {
+async function fetchFeed(url: string, timeoutMs: number = 8000): Promise<FeedItem[]> {
   try {
     const response = await axios.get(url, {
-      timeout: 10000,
+      timeout: timeoutMs,
       headers: {
         'User-Agent': 'Yardscore/1.0 Research Bot',
         Accept: 'application/rss+xml, application/xml, text/xml, application/atom+xml',
@@ -117,14 +117,16 @@ async function fetchFeed(url: string): Promise<FeedItem[]> {
 
 async function fetchAllFeeds(maxFeeds?: number): Promise<{ items: FeedItem[]; scanned: number; successful: number }> {
   let urls = getAllFeedUrls()
-  if (maxFeeds && maxFeeds < urls.length) {
-    // For manual runs: take a representative sample prioritising suburb-specific feeds
+  const isLimited = maxFeeds && maxFeeds < urls.length
+  if (isLimited) {
+    // For manual runs: prioritise suburb-specific feeds
     const suburbFeeds = urls.filter(u => u.includes('%22'))
     const otherFeeds = urls.filter(u => !u.includes('%22'))
     urls = [...suburbFeeds.slice(0, Math.floor(maxFeeds * 0.7)), ...otherFeeds.slice(0, Math.floor(maxFeeds * 0.3))]
-    console.log(`[research] Limited to ${urls.length} feeds (${suburbFeeds.slice(0, Math.floor(maxFeeds * 0.7)).length} suburb-specific)`)
+    console.log(`[research] Limited to ${urls.length} feeds (${Math.floor(maxFeeds * 0.7)} suburb-specific)`)
   }
-  const results = await Promise.allSettled(urls.map(url => fetchFeed(url)))
+  const timeout = isLimited ? 5000 : 8000 // faster timeouts for manual runs
+  const results = await Promise.allSettled(urls.map(url => fetchFeed(url, timeout)))
 
   const allItems: FeedItem[] = []
   let successful = 0
@@ -627,13 +629,17 @@ export async function runFullResearchCycle(options?: { maxFeeds?: number; quick?
   }
   await KnowledgeStore.saveSentiment(sentiment as unknown as Record<string, unknown>)
 
-  // Step 7: Update suburb scores from RAW article texts (not just insight summaries)
+  // Step 7: Update suburb scores from RAW article texts
   console.log('[research] Step 7: Updating suburb scores from article texts...')
-  await updateSuburbScoresFromArticles(allItems)
+  // In quick mode only score suburbs from the articles we already detected
+  const articlesToScore = isQuick ? suburbArticles : allItems
+  await updateSuburbScoresFromArticles(articlesToScore)
 
-  // Step 8: Seed scores for any handbook suburbs not yet scored
-  console.log('[research] Step 8: Seeding missing suburb scores from handbook...')
-  await seedMissingSuburbScores(sentiment)
+  // Step 8: Seed scores for any handbook suburbs not yet scored (skip in quick mode)
+  if (!isQuick) {
+    console.log('[research] Step 8: Seeding missing suburb scores from handbook...')
+    await seedMissingSuburbScores(sentiment)
+  }
 
   const kvStats = await KnowledgeStore.getStats()
   console.log(`[research] Persisted ${savedCount} insights, ${mentionCount} suburb mentions to KV. Total in store: ${kvStats.totalInsights} insights, ${kvStats.infraAlerts} infra alerts, ${kvStats.sentimentHistory} sentiment records`)
