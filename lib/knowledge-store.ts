@@ -13,10 +13,17 @@
 
 import { Redis } from '@upstash/redis'
 
-const kv = new Redis({
-  url: process.env.KV_REST_API_URL!,
-  token: process.env.KV_REST_API_TOKEN!,
-})
+let _kv: Redis | null = null
+
+function getKv(): Redis {
+  if (!_kv) {
+    _kv = new Redis({
+      url: process.env.KV_REST_API_URL || '',
+      token: process.env.KV_REST_API_TOKEN || '',
+    })
+  }
+  return _kv
+}
 
 function isKvConfigured(): boolean {
   return !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN)
@@ -32,28 +39,28 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return
     try {
       const id = `insight:${Date.now()}:${Math.random().toString(36).slice(2)}`
-      await kv.set(id, JSON.stringify(insight), { ex: 60 * 60 * 24 * 90 }) // 90 days — auto-expires
-      await kv.lpush('insights:all', id)
+      await getKv().set(id, JSON.stringify(insight), { ex: 60 * 60 * 24 * 90 }) // 90 days — auto-expires
+      await getKv().lpush('insights:all', id)
       // No ltrim — keep all insights. Individual records auto-expire after 90 days.
       // Lists accumulate stale IDs over time but getters handle null lookups gracefully.
 
       // Index by state
       const state = insight.state as string | undefined
       if (state) {
-        await kv.lpush(`insights:state:${state}`, id)
+        await getKv().lpush(`insights:state:${state}`, id)
       }
 
       // Index by suburb
       const suburb = insight.suburb as string | undefined
       if (suburb) {
         const suburbKey = suburb.toLowerCase().replace(/\s+/g, '-')
-        await kv.lpush(`insights:suburb:${suburbKey}`, id)
+        await getKv().lpush(`insights:suburb:${suburbKey}`, id)
       }
 
       // Index by urgency
       const urgency = insight.urgency as string | undefined
       if (urgency === 'high' || urgency === 'breaking') {
-        await kv.lpush('insights:urgent', id)
+        await getKv().lpush('insights:urgent', id)
       }
     } catch (e) {
       console.error('[knowledge-store] saveInsight failed:', e instanceof Error ? e.message : String(e))
@@ -63,11 +70,11 @@ export const KnowledgeStore = {
   async getLatestInsights(limit: number = 50): Promise<Record<string, unknown>[]> {
     if (!isKvConfigured()) return []
     try {
-      const ids = await kv.lrange('insights:all', 0, limit - 1) as string[]
+      const ids = await getKv().lrange('insights:all', 0, limit - 1) as string[]
       if (!ids || ids.length === 0) return []
       const insights = await Promise.all(
         ids.map(async (id) => {
-          const data = await kv.get(id)
+          const data = await getKv().get(id)
           if (!data) return null
           return typeof data === 'string' ? JSON.parse(data) : data
         })
@@ -80,11 +87,11 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return []
     try {
       const suburbKey = suburb.toLowerCase().replace(/\s+/g, '-')
-      const ids = await kv.lrange(`insights:suburb:${suburbKey}`, 0, 99) as string[]
+      const ids = await getKv().lrange(`insights:suburb:${suburbKey}`, 0, 99) as string[]
       if (!ids || ids.length === 0) return []
       const insights = await Promise.all(
         ids.map(async (id) => {
-          const data = await kv.get(id)
+          const data = await getKv().get(id)
           if (!data) return null
           return typeof data === 'string' ? JSON.parse(data) : data
         })
@@ -96,11 +103,11 @@ export const KnowledgeStore = {
   async getStateInsights(state: string): Promise<Record<string, unknown>[]> {
     if (!isKvConfigured()) return []
     try {
-      const ids = await kv.lrange(`insights:state:${state}`, 0, 199) as string[]
+      const ids = await getKv().lrange(`insights:state:${state}`, 0, 199) as string[]
       if (!ids || ids.length === 0) return []
       const insights = await Promise.all(
         ids.map(async (id) => {
-          const data = await kv.get(id)
+          const data = await getKv().get(id)
           if (!data) return null
           return typeof data === 'string' ? JSON.parse(data) : data
         })
@@ -112,11 +119,11 @@ export const KnowledgeStore = {
   async getUrgentInsights(): Promise<Record<string, unknown>[]> {
     if (!isKvConfigured()) return []
     try {
-      const ids = await kv.lrange('insights:urgent', 0, 99) as string[]
+      const ids = await getKv().lrange('insights:urgent', 0, 99) as string[]
       if (!ids || ids.length === 0) return []
       const insights = await Promise.all(
         ids.map(async (id) => {
-          const data = await kv.get(id)
+          const data = await getKv().get(id)
           if (!data) return null
           return typeof data === 'string' ? JSON.parse(data) : data
         })
@@ -132,12 +139,12 @@ export const KnowledgeStore = {
   async saveSentiment(sentiment: Record<string, unknown>): Promise<void> {
     if (!isKvConfigured()) return
     try {
-      await kv.set('sentiment:latest', JSON.stringify({
+      await getKv().set('sentiment:latest', JSON.stringify({
         ...sentiment,
         savedAt: new Date().toISOString(),
       }))
-      await kv.lpush('sentiment:history', JSON.stringify(sentiment))
-      await kv.ltrim('sentiment:history', 0, 29) // 30 days history
+      await getKv().lpush('sentiment:history', JSON.stringify(sentiment))
+      await getKv().ltrim('sentiment:history', 0, 29) // 30 days history
     } catch (e) {
       console.error('[knowledge-store] saveSentiment failed:', e instanceof Error ? e.message : String(e))
     }
@@ -146,7 +153,7 @@ export const KnowledgeStore = {
   async getLatestSentiment(): Promise<Record<string, unknown> | null> {
     if (!isKvConfigured()) return null
     try {
-      const data = await kv.get('sentiment:latest')
+      const data = await getKv().get('sentiment:latest')
       if (!data) return null
       return typeof data === 'string' ? JSON.parse(data) : data as Record<string, unknown>
     } catch { return null }
@@ -160,12 +167,12 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return
     try {
       const id = `infra:${Date.now()}:${Math.random().toString(36).slice(2)}`
-      await kv.set(id, JSON.stringify(alert), { ex: 60 * 60 * 24 * 180 }) // 6 months — auto-expires
-      await kv.lpush('infra:alerts', id)
+      await getKv().set(id, JSON.stringify(alert), { ex: 60 * 60 * 24 * 180 }) // 6 months — auto-expires
+      await getKv().lpush('infra:alerts', id)
 
       const state = alert.state as string | undefined
       if (state) {
-        await kv.lpush(`infra:state:${state}`, id)
+        await getKv().lpush(`infra:state:${state}`, id)
       }
     } catch (e) {
       console.error('[knowledge-store] saveInfrastructureAlert failed:', e instanceof Error ? e.message : String(e))
@@ -176,11 +183,11 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return []
     try {
       const key = state ? `infra:state:${state}` : 'infra:alerts'
-      const ids = await kv.lrange(key, 0, 99) as string[]
+      const ids = await getKv().lrange(key, 0, 99) as string[]
       if (!ids || ids.length === 0) return []
       const alerts = await Promise.all(
         ids.map(async (id) => {
-          const data = await kv.get(id)
+          const data = await getKv().get(id)
           if (!data) return null
           return typeof data === 'string' ? JSON.parse(data) : data
         })
@@ -197,8 +204,8 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return
     try {
       const countKey = `mentions:count:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
-      await kv.incr(countKey)
-      await kv.expire(countKey, 60 * 60 * 24 * 30) // 30-day rolling window
+      await getKv().incr(countKey)
+      await getKv().expire(countKey, 60 * 60 * 24 * 30) // 30-day rolling window
     } catch (e) {
       console.error('[knowledge-store] incrementSuburbMention failed:', e instanceof Error ? e.message : String(e))
     }
@@ -211,7 +218,7 @@ export const KnowledgeStore = {
   }>> {
     if (!isKvConfigured()) return []
     try {
-      const keys = await kv.keys('mentions:count:*') as string[]
+      const keys = await getKv().keys('mentions:count:*') as string[]
       if (!keys || keys.length === 0) return []
 
       const suburbs = await Promise.all(
@@ -222,7 +229,7 @@ export const KnowledgeStore = {
             .split(' ')
             .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
             .join(' ')
-          const count = await kv.get(key)
+          const count = await getKv().get(key)
           const mentions = typeof count === 'number' ? count : parseInt(String(count || '0'))
           return { suburb, state, mentions }
         })
@@ -244,14 +251,14 @@ export const KnowledgeStore = {
     try {
       const key = `score:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
       const overall = (data.overallScore as number) || 0
-      await kv.set(key, JSON.stringify({
+      await getKv().set(key, JSON.stringify({
         ...data,
         suburb,
         state,
         updatedAt: new Date().toISOString(),
       }), { ex: 60 * 60 * 24 * 30 }) // 30 days
       // Sorted set for ranking
-      await kv.zadd('suburbs:scores:all', { score: overall, member: `${suburb}|${state}` })
+      await getKv().zadd('suburbs:scores:all', { score: overall, member: `${suburb}|${state}` })
     } catch (e) {
       console.error('[knowledge-store] saveSuburbScore failed:', e instanceof Error ? e.message : String(e))
     }
@@ -261,7 +268,7 @@ export const KnowledgeStore = {
     if (!isKvConfigured()) return null
     try {
       const key = `score:${state.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
-      const data = await kv.get(key)
+      const data = await getKv().get(key)
       if (!data) return null
       return typeof data === 'string' ? JSON.parse(data) : data as Record<string, unknown>
     } catch { return null }
@@ -270,14 +277,14 @@ export const KnowledgeStore = {
   async getTopScoredSuburbs(limit: number = 50): Promise<Record<string, unknown>[]> {
     if (!isKvConfigured()) return []
     try {
-      const members = await kv.zrange('suburbs:scores:all', 0, limit - 1, { rev: true }) as string[]
+      const members = await getKv().zrange('suburbs:scores:all', 0, limit - 1, { rev: true }) as string[]
       if (!members || members.length === 0) return []
 
       const scores = await Promise.all(
         members.map(async (member) => {
           const [suburb, subState] = member.split('|')
           const key = `score:${subState.toLowerCase()}:${suburb.toLowerCase().replace(/\s+/g, '-')}`
-          const data = await kv.get(key)
+          const data = await getKv().get(key)
           if (!data) return null
           return typeof data === 'string' ? JSON.parse(data) : data
         })
@@ -302,10 +309,10 @@ export const KnowledgeStore = {
     }
     try {
       const [totalInsights, urgentInsights, infraAlerts, sentimentHistory] = await Promise.all([
-        kv.llen('insights:all'),
-        kv.llen('insights:urgent'),
-        kv.llen('infra:alerts'),
-        kv.llen('sentiment:history'),
+        getKv().llen('insights:all'),
+        getKv().llen('insights:urgent'),
+        getKv().llen('infra:alerts'),
+        getKv().llen('sentiment:history'),
       ])
       return {
         totalInsights: totalInsights ?? 0,
@@ -331,9 +338,9 @@ export const KnowledgeStore = {
   }): Promise<void> {
     if (!isKvConfigured()) return
     try {
-      await kv.set('research:lastRun', JSON.stringify(stats))
-      await kv.lpush('research:runHistory', JSON.stringify(stats))
-      await kv.ltrim('research:runHistory', 0, 29) // keep 30 runs
+      await getKv().set('research:lastRun', JSON.stringify(stats))
+      await getKv().lpush('research:runHistory', JSON.stringify(stats))
+      await getKv().ltrim('research:runHistory', 0, 29) // keep 30 runs
     } catch (e) {
       console.error('[knowledge-store] saveLastRunStats failed:', e instanceof Error ? e.message : String(e))
     }
@@ -342,7 +349,7 @@ export const KnowledgeStore = {
   async getLastRunStats(): Promise<Record<string, unknown> | null> {
     if (!isKvConfigured()) return null
     try {
-      const data = await kv.get('research:lastRun')
+      const data = await getKv().get('research:lastRun')
       if (!data) return null
       return typeof data === 'string' ? JSON.parse(data) : data as Record<string, unknown>
     } catch { return null }
@@ -351,7 +358,7 @@ export const KnowledgeStore = {
   async getRunHistory(limit: number = 7): Promise<Record<string, unknown>[]> {
     if (!isKvConfigured()) return []
     try {
-      const items = await kv.lrange('research:runHistory', 0, limit - 1) as string[]
+      const items = await getKv().lrange('research:runHistory', 0, limit - 1) as string[]
       if (!items || items.length === 0) return []
       return items.map(item => typeof item === 'string' ? JSON.parse(item) : item) as Record<string, unknown>[]
     } catch { return [] }
@@ -364,8 +371,8 @@ export const KnowledgeStore = {
   async testConnection(): Promise<boolean> {
     if (!isKvConfigured()) return false
     try {
-      await kv.set('test:connection', 'ok', { ex: 60 })
-      const result = await kv.get('test:connection')
+      await getKv().set('test:connection', 'ok', { ex: 60 })
+      const result = await getKv().get('test:connection')
       return result === 'ok'
     } catch { return false }
   },
