@@ -298,40 +298,54 @@ Only include insights relevant to Australian property investment. Skip generic o
       const text = await askClaudeWithTimeout(EXTRACTION_SYSTEM_PROMPT, userContent, BATCH_TIMEOUT_MS)
       const parsed = JSON.parse(text)
       if (Array.isArray(parsed)) {
-        // Tag any insights with null suburb/state using our suburb detector
-        const batchText = batch.map(item => `${item.title} ${item.description}`).join(' ')
         let tagged = 0
+        let autoCreated = 0
+
+        // Tag each insight using the INDIVIDUAL article it came from (by title match)
         for (const insight of parsed) {
           if (!insight.suburb || !insight.state || insight.suburb === 'null' || insight.state === 'null') {
-            const articleText = insight.source
-              ? (batch.find(b => b.source === insight.source)?.title + ' ' + batch.find(b => b.source === insight.source)?.description) || batchText
-              : batchText
+            // Find the specific article this insight came from by matching title words
+            const insightTitle = (insight.title || '').toLowerCase()
+            const matchedArticle = batch.find(b =>
+              insightTitle.split(' ').filter((w: string) => w.length > 4).some((w: string) =>
+                b.title.toLowerCase().includes(w) || b.description.toLowerCase().includes(w)
+              )
+            )
+            const articleText = matchedArticle
+              ? `${matchedArticle.title} ${matchedArticle.description}`
+              : `${insight.title} ${insight.summary}`
+
             const result = tagInsightWithSuburb(insight, articleText)
             insight.suburb = result.suburb
             insight.state = result.state
-            if (insight.suburb) tagged++
+            if (insight.suburb && insight.suburb !== 'Australia') tagged++
           }
         }
 
-        // Also detect suburbs mentioned in batch articles that Claude missed
-        const detectedSuburbs = detectSuburbsInText(batchText)
-        const existingSuburbs = new Set(parsed.map((i: { suburb?: string }) => i.suburb?.toLowerCase()).filter(Boolean))
-        let autoCreated = 0
+        // Also scan EACH article individually for suburb mentions (not combined batch)
+        const existingSuburbs = new Set(
+          parsed.map((ins: { suburb?: string }) => ins.suburb?.toLowerCase()).filter(Boolean)
+        )
 
-        for (const { suburb, state, mentions } of detectedSuburbs.slice(0, 5)) {
-          if (existingSuburbs.has(suburb.toLowerCase())) continue
-          if (mentions < 2) continue // Only create insights for suburbs mentioned 2+ times
+        for (const item of batch) {
+          const articleText = `${item.title} ${item.description}`
+          const detectedSuburbs = detectSuburbsInText(articleText)
 
-          const articleScore = scoreArticle(batchText)
-          parsed.push({
-            title: `${suburb} mentioned in property news`,
-            summary: `${suburb}, ${state} was mentioned ${mentions} times in today's property research articles. Article sentiment: ${articleScore.sentiment} (${articleScore.normalisedScore}/10).`,
-            source: batch[0]?.source || '',
-            suburb,
-            state,
-            category: 'market_data',
-          })
-          autoCreated++
+          for (const { suburb, state, mentions } of detectedSuburbs.slice(0, 3)) {
+            if (existingSuburbs.has(suburb.toLowerCase())) continue
+
+            const articleScore = scoreArticle(articleText)
+            parsed.push({
+              title: `${suburb} in property news`,
+              summary: `${suburb}, ${state} mentioned in: ${item.title.slice(0, 80)}. Sentiment: ${articleScore.sentiment} (${articleScore.normalisedScore}/10).`,
+              source: item.link || item.source,
+              suburb,
+              state,
+              category: 'market_data',
+            })
+            existingSuburbs.add(suburb.toLowerCase())
+            autoCreated++
+          }
         }
 
         console.log(`[research] Batch ${batchNum}: ${parsed.length} insights (${tagged} suburb-tagged, ${autoCreated} auto-created)`)
