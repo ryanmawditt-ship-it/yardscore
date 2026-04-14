@@ -110,9 +110,15 @@ function computeClientScore(report: FinalReport, primaryGoal: string): number {
 // Full deep analysis for a single property
 // ---------------------------------------------------------------------------
 
-async function deepAnalyse(property: GeocodedProperty): Promise<FinalReport | null> {
+async function deepAnalyse(property: GeocodedProperty, listingPrice?: number | null): Promise<FinalReport | null> {
   try {
     const [analysis, risk] = await Promise.all([safeAnalyseProperty(property), safeAnalyseRisk(property)]);
+
+    // Inject the real listing price so yield and valuation agents use it
+    if (listingPrice && !analysis.lastSalePrice) {
+      analysis.lastSalePrice = listingPrice;
+    }
+
     const [infrastructure, yieldData] = await Promise.all([safeAnalyseInfrastructure(property), safeAnalyseYield(property, analysis)]);
     const valuation = await safeAnalyseValuation(property, analysis, risk, infrastructure, yieldData);
     const { overallScore, executiveSummary } = await synthesise(property, analysis, risk, infrastructure, yieldData, valuation);
@@ -225,7 +231,10 @@ export async function POST(request: NextRequest) {
       console.log(`\n[pipeline] Phase 3: Running deep analysis on ${toAnalyse.length} candidates...`);
 
       const analysisResults = await Promise.allSettled(
-        toAnalyse.map((c) => deepAnalyse(c.property))
+        toAnalyse.map((c) => {
+          const meta = getCachedListingMeta(c.property.address);
+          return deepAnalyse(c.property, meta?.price ?? null);
+        })
       );
 
       const reports: FinalReport[] = [];
