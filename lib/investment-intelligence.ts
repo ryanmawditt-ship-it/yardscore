@@ -723,18 +723,33 @@ export function getBudgetTier(budget: number): string {
 }
 
 export function getTopPicksForBudget(state: string, budget: number): SuburbPick[] {
-  const stateData = investmentIntelligence[state];
-  if (!stateData) return investmentIntelligence.QLD.from500kTo750k.topPicks;
+  // Import verified prices at call time to avoid circular deps
+  let getSuburbPrices: ((s: string, st?: string) => { median: number | null } | null) | null = null;
+  try {
+    getSuburbPrices = require("./suburb-prices").getSuburbPrices;
+  } catch {}
 
-  // Collect ALL suburbs from tiers at or below budget, filtered by actual median price
+  const stateData = investmentIntelligence[state];
+  if (!stateData) return investmentIntelligence.QLD?.from500kTo750k?.topPicks ?? [];
+
+  // Collect ALL suburbs, using VERIFIED price when available, otherwise intelligence median
   const allPicks: SuburbPick[] = [];
   const seen = new Set<string>();
 
   for (const tier of Object.values(stateData)) {
     for (const pick of tier.topPicks) {
-      if (pick.medianHousePrice <= budget * 1.10 && !seen.has(pick.suburb)) {
+      if (seen.has(pick.suburb)) continue;
+
+      // Use verified AllHomes median if available, otherwise fall back to intelligence data
+      const verified = getSuburbPrices?.(pick.suburb, state);
+      const actualMedian = verified?.median ?? pick.medianHousePrice;
+
+      // Check if the CHEAPEST listing (not median) is within budget
+      // This means there are properties available at this price point
+      if (actualMedian <= budget * 1.15) {
         seen.add(pick.suburb);
-        allPicks.push(pick);
+        // Update the pick's median to reflect reality
+        allPicks.push({ ...pick, medianHousePrice: actualMedian });
       }
     }
   }
@@ -747,7 +762,7 @@ export function getTopPicksForBudget(state: string, budget: number): SuburbPick[
   if (tierData) return tierData.topPicks;
 
   const tiers = Object.values(stateData);
-  return tiers[0]?.topPicks || investmentIntelligence.QLD.from500kTo750k.topPicks;
+  return tiers[0]?.topPicks ?? [];
 }
 
 export function findSuburbPick(suburb: string, state: string): SuburbPick | null {
