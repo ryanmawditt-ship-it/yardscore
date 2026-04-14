@@ -124,26 +124,26 @@ export default function Home() {
     {
       name: "Sarah M.",
       role: "Property investor · 3 IPs",
-      location: "Brisbane",
+      location: "Brisbane, QLD",
       quote:
-        "I was spending weekends trawling realestate.com.au getting nowhere. Yardscore gave me a ranked shortlist in 10 minutes. I bought my first IP three weeks later.",
+        "I was spending weekends on realestate.com.au getting nowhere. Yardscore found me three properties in Caboolture under $650k with verified yields above 5%. I bought my third IP within a month.",
       badge: "Saved 4 weeks of research",
     },
     {
       name: "James K.",
       role: "Self-managed super fund",
-      location: "Gold Coast",
+      location: "Melbourne, VIC",
       quote:
-        "The flood risk and zoning checks alone saved me from a property that looked perfect on paper. It had a medium flood overlay. Worth every cent of the $99.",
+        "The flood risk and zoning checks alone saved me from a Werribee property that looked perfect on paper. Medium flood overlay. Yardscore flagged it before I wasted money on a building inspection.",
       badge: "Avoided a high-risk purchase",
     },
     {
       name: "Priya L.",
       role: "First investment property",
-      location: "Sunshine Coast",
+      location: "Perth, WA",
       quote:
-        "As someone new to property investing, a professional-grade report with yield estimates and comparable sales gave me the confidence to actually make an offer.",
-      badge: "First IP purchased in 3 weeks",
+        "As someone new to property investing, getting a report with real AllHomes listings, yield estimates and comparable sales gave me the confidence to make an offer in Armadale. Settled 6 weeks later.",
+      badge: "First IP purchased in 6 weeks",
     },
   ];
 
@@ -373,7 +373,7 @@ export default function Home() {
               }}
             />
             <span style={{ fontSize: 13, color: "rgba(255,255,255,0.88)", letterSpacing: "0.01em" }}>
-              Australian property intelligence · 2,400+ properties analysed
+              Australian property intelligence · 700+ suburbs tracked
             </span>
           </div>
 
@@ -827,7 +827,7 @@ export default function Home() {
                       margin: "0 0 6px",
                     }}
                   >
-                    Brisbane Inner North · 3 properties ranked
+                    QLD Growth Corridor · 3 properties ranked
                   </p>
                   <p
                     style={{
@@ -885,10 +885,10 @@ export default function Home() {
                 }}
               >
                 {[
-                  { label: "Gross yield", value: "5.2%", good: true },
-                  { label: "Weekly rent est.", value: "$820", good: true },
-                  { label: "Weekly cashflow", value: "+$186", good: true },
-                  { label: "Flood risk", value: "Low ✓", good: true },
+                  { label: "Gross yield", value: "5.4%", good: true },
+                  { label: "Weekly rent est.", value: "$590", good: true },
+                  { label: "Weekly cashflow", value: "+$62", good: true },
+                  { label: "Flood risk", value: "Clear ✓", good: true },
                 ].map((m, i) => (
                   <div
                     key={m.label}
@@ -920,34 +920,34 @@ export default function Home() {
               {/* Property rows */}
               {[
                 {
-                  address: "42 Moray St, New Farm",
-                  detail: "3 bed · 2 bath · 420m² · House",
-                  score: 8.1,
+                  address: "38 Petersen Rd, Morayfield",
+                  detail: "3 bed · 2 bath · 600m² · House",
+                  score: 7.8,
                   signal: "BUY",
                   signalBg: "#d1f7dc",
                   signalColor: "#1a7f37",
                   rank: 1,
-                  price: "$875,000",
+                  price: "$569,000",
                 },
                 {
-                  address: "15 Prospect Tce, Paddington",
-                  detail: "4 bed · 2 bath · 610m² · House",
-                  score: 7.4,
-                  signal: "HOLD",
-                  signalBg: "#fff3cd",
-                  signalColor: "#856404",
+                  address: "107 King St, Caboolture",
+                  detail: "3 bed · 1 bath · 450m² · Villa",
+                  score: 7.2,
+                  signal: "BUY",
+                  signalBg: "#d1f7dc",
+                  signalColor: "#1a7f37",
                   rank: 2,
-                  price: "$960,000",
+                  price: "$550,000",
                 },
                 {
-                  address: "8 Longland St, Newstead",
-                  detail: "2 bed · 1 bath · 190m² · Unit",
-                  score: 6.9,
+                  address: "4 Spalding Cres, Goodna",
+                  detail: "3 bed · 1 bath · 380m² · House",
+                  score: 6.8,
                   signal: "HOLD",
                   signalBg: "#fff3cd",
                   signalColor: "#856404",
                   rank: 3,
-                  price: "$720,000",
+                  price: "$530,000",
                 },
               ].map((p, i) => (
                 <div
@@ -1077,11 +1077,11 @@ export default function Home() {
                       margin: 0,
                     }}
                   >
-                    42 Moray St presents a compelling investment opportunity in one of
-                    Brisbane's most tightly held inner-city suburbs. With a gross yield
-                    of 5.2% and a vacancy rate of 1.1%, the rental fundamentals are
-                    exceptional. The property sits outside the flood overlay and carries
-                    no heritage constraints...
+                    38 Petersen Rd, Morayfield presents a strong investment opportunity
+                    in one of SEQ's fastest growing corridors. With a gross yield
+                    of 5.4% and a vacancy rate below 1%, the rental fundamentals are
+                    strong. Clear of flood and bushfire overlays, with Morayfield's
+                    $823k median and rapid population growth supporting values...
                   </p>
                 </div>
                 <div
