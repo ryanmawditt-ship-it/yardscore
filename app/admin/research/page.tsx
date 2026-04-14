@@ -115,7 +115,7 @@ export default function ResearchDashboard() {
   const loadStoredData = useCallback(async () => {
     setLoadingStored(true)
     try {
-      const res = await fetch('/api/research-update', { method: 'GET', headers: { 'x-admin-key': adminKey } })
+      const res = await fetch('/api/research-data', { method: 'GET', headers: { 'x-admin-key': adminKey } })
       if (res.ok) setStored(await res.json())
     } catch {} finally { setLoadingStored(false) }
   }, [adminKey])
