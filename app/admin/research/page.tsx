@@ -67,11 +67,11 @@ interface StoredData {
 
 function UrgencyBadge({ urgency }: { urgency: string }) {
   const c: Record<string, string> = { breaking: 'bg-red-600 text-white', high: 'bg-orange-500 text-white', medium: 'bg-yellow-400 text-gray-900', low: 'bg-gray-200 text-gray-700' }
-  return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${c[urgency] || c.low}`}>{urgency.toUpperCase()}</span>
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${c[urgency || 'low'] || c.low}`}>{(urgency || 'low').toUpperCase()}</span>
 }
 function ImpactBadge({ impact }: { impact: string }) {
   const c: Record<string, string> = { positive: 'bg-green-100 text-green-800', negative: 'bg-red-100 text-red-800', neutral: 'bg-gray-100 text-gray-600' }
-  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c[impact] || c.neutral}`}>{impact}</span>
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c[impact || 'neutral'] || c.neutral}`}>{impact || 'neutral'}</span>
 }
 function SentimentGauge({ score, label }: { score: number; label: string }) {
   const pct = ((score + 100) / 200) * 100
