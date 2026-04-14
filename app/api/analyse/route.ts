@@ -69,16 +69,32 @@ async function safeAnalyseValuation(p: GeocodedProperty, a: PropertyAnalysis, r:
 // ---------------------------------------------------------------------------
 
 function parseBudget(budget: string): number {
+  // Exact value: "$650,000" or "$650000"
+  if (budget.startsWith("$")) {
+    const num = parseInt(budget.replace(/[$,\s]/g, ""), 10);
+    if (num >= 100000) return num;
+  }
+
+  // Ranges — use the TOP of each range as the max budget
   if (budget.includes("1.5M+")) return 2000000;
   if (budget.includes("1M") && budget.includes("1.5M")) return 1500000;
   if (budget.includes("1M")) return 1000000;
+  if (budget.includes("800k") && budget.includes("1M")) return 1000000;
+  if (budget.includes("700k") && budget.includes("800k")) return 800000;
+  if (budget.includes("600k") && budget.includes("700k")) return 700000;
+  if (budget.includes("500k") && budget.includes("600k")) return 600000;
+  if (budget.includes("400k") && budget.includes("500k")) return 500000;
+  if (budget.includes("Under") && budget.includes("400k")) return 400000;
+  // Legacy brackets
   if (budget.includes("750k") && budget.includes("1M")) return 1000000;
   if (budget.includes("500k") && budget.includes("750k")) return 750000;
   if (budget.includes("750k")) return 750000;
   if (budget.includes("500k")) return 500000;
   if (budget.includes("Under")) return 500000;
-  const m = budget.match(/[\d,.]+/);
-  return m ? parseInt(m[0].replace(/,/g, ""), 10) : 750000;
+
+  // Fallback: try to parse any number
+  const m = budget.replace(/,/g, "").match(/\d{5,}/);
+  return m ? parseInt(m[0], 10) : 750000;
 }
 function parseYieldTarget(s: string): number { const m = s.match(/([\d.]+)/); return m ? parseFloat(m[1]) : 0; }
 function parseBedrooms(s: string): number { const m = s.match(/(\d+)/); return m ? parseInt(m[1], 10) : 2; }

@@ -723,16 +723,31 @@ export function getBudgetTier(budget: number): string {
 }
 
 export function getTopPicksForBudget(state: string, budget: number): SuburbPick[] {
-  const tier = getBudgetTier(budget);
   const stateData = investmentIntelligence[state];
   if (!stateData) return investmentIntelligence.QLD.from500kTo750k.topPicks;
-  const tierData = stateData[tier];
-  if (!tierData) {
-    // Fall back to nearest available tier
-    const tiers = Object.values(stateData);
-    return tiers[0]?.topPicks || investmentIntelligence.QLD.from500kTo750k.topPicks;
+
+  // Collect ALL suburbs from tiers at or below budget, filtered by actual median price
+  const allPicks: SuburbPick[] = [];
+  const seen = new Set<string>();
+
+  for (const tier of Object.values(stateData)) {
+    for (const pick of tier.topPicks) {
+      if (pick.medianHousePrice <= budget * 1.10 && !seen.has(pick.suburb)) {
+        seen.add(pick.suburb);
+        allPicks.push(pick);
+      }
+    }
   }
-  return tierData.topPicks;
+
+  if (allPicks.length > 0) return allPicks;
+
+  // Fallback: nearest tier
+  const tier = getBudgetTier(budget);
+  const tierData = stateData[tier];
+  if (tierData) return tierData.topPicks;
+
+  const tiers = Object.values(stateData);
+  return tiers[0]?.topPicks || investmentIntelligence.QLD.from500kTo750k.topPicks;
 }
 
 export function findSuburbPick(suburb: string, state: string): SuburbPick | null {

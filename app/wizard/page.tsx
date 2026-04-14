@@ -746,15 +746,93 @@ export default function WizardPage() {
               >
                 What is your maximum<br />purchase budget?
               </h1>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p
+                style={{
+                  fontSize: 15,
+                  color: "#86868b",
+                  marginBottom: 28,
+                  letterSpacing: "-0.01em",
+                  lineHeight: 1.6,
+                }}
+              >
+                Be as specific as possible — our AI tailors suburb and property
+                recommendations to your exact budget.
+              </p>
+
+              {/* Precise budget input */}
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "#1d1d1f", display: "block", marginBottom: 8, letterSpacing: "-0.01em", ...sf }}>
+                  Enter your exact maximum budget
+                </label>
+                <div style={{ position: "relative" }}>
+                  <span style={{ position: "absolute", left: 18, top: "50%", transform: "translateY(-50%)", fontSize: 19, color: "#86868b", fontWeight: 600 }}>$</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={answers.budget.startsWith("$") ? answers.budget.slice(1) : (answers.budget.match(/^\d/) ? answers.budget : "")}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9]/g, "");
+                      if (raw) {
+                        const num = parseInt(raw, 10);
+                        const formatted = num.toLocaleString();
+                        update("budget", "$" + formatted);
+                      } else {
+                        update("budget", "");
+                      }
+                    }}
+                    placeholder="e.g. 650,000"
+                    style={{
+                      width: "100%",
+                      border: answers.budget.startsWith("$") ? "2px solid #0071e3" : "1.5px solid #e8e8ed",
+                      borderRadius: 16,
+                      padding: "18px 22px 18px 36px",
+                      fontSize: 22,
+                      fontWeight: 600,
+                      color: "#1d1d1f",
+                      backgroundColor: answers.budget.startsWith("$") ? "rgba(0,113,227,0.03)" : "#fff",
+                      letterSpacing: "-0.01em",
+                      boxSizing: "border-box" as const,
+                      transition: "border-color 0.2s, box-shadow 0.2s",
+                      outline: "none",
+                      ...sf,
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = "#0071e3";
+                      e.currentTarget.style.boxShadow = "0 0 0 4px rgba(0,113,227,0.1)";
+                    }}
+                    onBlur={(e) => {
+                      if (!answers.budget.startsWith("$")) {
+                        e.currentTarget.style.borderColor = "#e8e8ed";
+                      }
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  />
+                </div>
+                {answers.budget.startsWith("$") && (
+                  <p style={{ fontSize: 13, color: "#0071e3", marginTop: 8, fontWeight: 500, ...sf }}>
+                    Budget set to {answers.budget}
+                  </p>
+                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "16px 0" }}>
+                <div style={{ flex: 1, height: 1, backgroundColor: "#e8e8ed" }} />
+                <span style={{ fontSize: 13, color: "#86868b", ...sf }}>or choose a range</span>
+                <div style={{ flex: 1, height: 1, backgroundColor: "#e8e8ed" }} />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
-                  { label: "Under $500k", sublabel: "Entry-level opportunities" },
-                  { label: "$500k–$750k", sublabel: "Strong mid-market options" },
-                  { label: "$750k–$1M", sublabel: "Premium inner-city access" },
-                  { label: "$1M–$1.5M", sublabel: "Top-tier suburbs" },
-                  { label: "$1.5M+", sublabel: "Prestige market" },
+                  { label: "Under $400k", sublabel: "Regional" },
+                  { label: "$400k–$500k", sublabel: "Outer suburban" },
+                  { label: "$500k–$600k", sublabel: "Growth corridors" },
+                  { label: "$600k–$700k", sublabel: "Established suburbs" },
+                  { label: "$700k–$800k", sublabel: "Mid-market" },
+                  { label: "$800k–$1M", sublabel: "Inner ring" },
+                  { label: "$1M–$1.5M", sublabel: "Premium" },
+                  { label: "$1.5M+", sublabel: "Prestige" },
                 ].map((opt) => (
-                  <OptionCard
+                  <TileButton
                     key={opt.label}
                     label={opt.label}
                     sublabel={opt.sublabel}
