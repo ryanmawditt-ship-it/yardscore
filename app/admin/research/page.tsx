@@ -1,6 +1,29 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
+
+// Error boundary to prevent white screen of death
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: { children: React.ReactNode }) { super(props); this.state = { hasError: false, error: '' } }
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error: error.message } }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
+          <div className="bg-white rounded-2xl shadow-lg p-8 max-w-lg">
+            <h1 className="text-xl font-bold text-red-600 mb-2">Dashboard Error</h1>
+            <p className="text-sm text-gray-600 mb-4">{this.state.error}</p>
+            <button onClick={() => { this.setState({ hasError: false, error: '' }); window.location.reload() }}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+              Reload Page
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 // ─────────────────────────────────────────────────────────
 // TYPES
@@ -94,7 +117,11 @@ function timeAgo(dateStr: string): string {
 // MAIN
 // ─────────────────────────────────────────────────────────
 
-export default function ResearchDashboard() {
+export default function ResearchPage() {
+  return <ErrorBoundary><ResearchDashboard /></ErrorBoundary>
+}
+
+function ResearchDashboard() {
   const [data, setData] = useState<ResearchData | null>(null)
   const [stored, setStored] = useState<StoredData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -116,8 +143,23 @@ export default function ResearchDashboard() {
     setLoadingStored(true)
     try {
       const res = await fetch('/api/research-data', { method: 'GET', headers: { 'x-admin-key': adminKey } })
-      if (res.ok) setStored(await res.json())
-    } catch {} finally { setLoadingStored(false) }
+      if (res.ok) {
+        const json = await res.json()
+        // Sanitize: ensure all array fields are actually arrays
+        setStored({
+          stats: json.stats || { totalInsights: 0, urgentInsights: 0, infraAlerts: 0, sentimentHistory: 0, kvConfigured: false },
+          latestInsights: Array.isArray(json.latestInsights) ? json.latestInsights : [],
+          urgentInsights: Array.isArray(json.urgentInsights) ? json.urgentInsights : [],
+          sentiment: json.sentiment || null,
+          infraAlerts: Array.isArray(json.infraAlerts) ? json.infraAlerts : [],
+          lastRun: json.lastRun || null,
+          runHistory: Array.isArray(json.runHistory) ? json.runHistory : [],
+          connected: json.connected ?? false,
+          trendingSuburbs: Array.isArray(json.trendingSuburbs) ? json.trendingSuburbs : [],
+          topScored: Array.isArray(json.topScored) ? json.topScored : [],
+        })
+      }
+    } catch { /* silently fail */ } finally { setLoadingStored(false) }
   }, [adminKey])
 
   const runResearch = useCallback(async () => {
